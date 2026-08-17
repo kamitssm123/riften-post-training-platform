@@ -15,6 +15,7 @@ from typing import Optional
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
+from export_preference import build_preference_export
 from export_sft import build_sft_export
 from schema import Trace
 
@@ -286,3 +287,8 @@ def get_stats(
 @app.post("/export/sft")
 def export_sft():
     return build_sft_export()
+
+
+@app.post("/export/preference")
+def export_preference():
+    return build_preference_export()
