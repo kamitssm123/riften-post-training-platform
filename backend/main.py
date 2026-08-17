@@ -15,6 +15,7 @@ from typing import Optional
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
+from exclusion_report import build_exclusion_report
 from export_preference import build_preference_export
 from export_sft import build_sft_export
 from schema import Trace
@@ -292,3 +293,8 @@ def export_sft():
 @app.post("/export/preference")
 def export_preference():
     return build_preference_export()
+
+
+@app.get("/export/exclusions")
+def export_exclusions():
+    return build_exclusion_report()

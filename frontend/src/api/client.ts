@@ -1,3 +1,4 @@
+import type { ExclusionReport } from "../types/exclusion";
 import type {
   SessionResponse,
   Stats,
@@ -52,5 +53,11 @@ export async function fetchStats(filters: Partial<TraceFilters>): Promise<Stats>
   const params = filtersToParams(filters);
   const res = await fetch(`${BASE}/stats?${params.toString()}`);
   if (!res.ok) throw new Error(`GET /stats failed: ${res.status}`);
+  return res.json();
+}
+
+export async function fetchExclusionReport(): Promise<ExclusionReport> {
+  const res = await fetch(`${BASE}/export/exclusions`);
+  if (!res.ok) throw new Error(`GET /export/exclusions failed: ${res.status}`);
   return res.json();
 }

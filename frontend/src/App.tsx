@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
-import { fetchSession, fetchStats, fetchTrace, fetchTraces } from "./api/client";
+import { fetchExclusionReport, fetchSession, fetchStats, fetchTrace, fetchTraces } from "./api/client";
+import { ExclusionPanel } from "./components/ExclusionPanel";
 import { FilterRail } from "./components/FilterRail";
 import { SessionThread } from "./components/SessionThread";
 import { TraceDetail } from "./components/TraceDetail";
 import { TraceTable } from "./components/TraceTable";
+import type { ExclusionReport } from "./types/exclusion";
 import {
   EMPTY_FILTERS,
   type SessionResponse,
@@ -15,7 +17,11 @@ import {
 
 const PAGE_SIZE = 30;
 
-type Panel = { kind: "none" } | { kind: "trace"; id: string } | { kind: "session"; id: string };
+type Panel =
+  | { kind: "none" }
+  | { kind: "trace"; id: string }
+  | { kind: "session"; id: string }
+  | { kind: "exclusions" };
 
 export default function App() {
   const [filters, setFilters] = useState<TraceFilters>(EMPTY_FILTERS);
@@ -28,6 +34,7 @@ export default function App() {
   const [panel, setPanel] = useState<Panel>({ kind: "none" });
   const [traceDetail, setTraceDetail] = useState<TraceDetailT | null>(null);
   const [session, setSession] = useState<SessionResponse | null>(null);
+  const [exclusionReport, setExclusionReport] = useState<ExclusionReport | null>(null);
   const [panelLoading, setPanelLoading] = useState(false);
 
   useEffect(() => {
@@ -87,6 +94,21 @@ export default function App() {
         cancelled = true;
       };
     }
+    if (panel.kind === "exclusions") {
+      let cancelled = false;
+      setPanelLoading(true);
+      setTraceDetail(null);
+      setSession(null);
+      fetchExclusionReport().then((res) => {
+        if (!cancelled) {
+          setExclusionReport(res);
+          setPanelLoading(false);
+        }
+      });
+      return () => {
+        cancelled = true;
+      };
+    }
     setTraceDetail(null);
     setSession(null);
   }, [panel]);
@@ -100,7 +122,21 @@ export default function App() {
           <span className="text-[14px] font-semibold tracking-tight">riften</span>
           <span className="text-[12px] text-[var(--text-faint)]">trace inspector</span>
         </div>
-        <div className="text-[11px] text-[var(--text-faint)]">synthetic corpus &middot; no production traffic</div>
+        <div className="flex items-center gap-4">
+          <button
+            onClick={() => setPanel({ kind: "exclusions" })}
+            className={`text-[11px] transition-colors ${
+              panel.kind === "exclusions"
+                ? "text-[var(--accent)]"
+                : "text-[var(--text-faint)] hover:text-[var(--text)]"
+            }`}
+          >
+            Exclusion report
+          </button>
+          <div className="text-[11px] text-[var(--text-faint)]">
+            synthetic corpus &middot; no production traffic
+          </div>
+        </div>
       </header>
 
       <div className="flex min-h-0 flex-1">
@@ -144,19 +180,28 @@ export default function App() {
 
         {panel.kind !== "none" && (
           <div className="w-[520px] shrink-0 border-l border-[var(--border)]">
-            {panel.kind === "trace" ? (
+            {panel.kind === "trace" && (
               <TraceDetail
                 trace={traceDetail}
                 loading={panelLoading}
                 onOpenSession={(sessionId) => setPanel({ kind: "session", id: sessionId })}
                 onClose={() => setPanel({ kind: "none" })}
               />
-            ) : (
+            )}
+            {panel.kind === "session" && (
               <SessionThread
                 session={session}
                 loading={panelLoading}
                 onSelectTrace={(id) => setPanel({ kind: "trace", id })}
                 onClose={() => setPanel({ kind: "none" })}
+              />
+            )}
+            {panel.kind === "exclusions" && (
+              <ExclusionPanel
+                report={exclusionReport}
+                loading={panelLoading}
+                onClose={() => setPanel({ kind: "none" })}
+                onInspectTrace={(id) => setPanel({ kind: "trace", id })}
               />
             )}
           </div>
