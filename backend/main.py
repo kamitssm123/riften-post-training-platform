@@ -15,6 +15,7 @@ from typing import Optional
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
+from export_sft import build_sft_export
 from schema import Trace
 
 DB_PATH = Path(__file__).resolve().parent.parent / "data" / "traces.db"
@@ -280,3 +281,8 @@ def get_stats(
         }
     finally:
         conn.close()
+
+
+@app.post("/export/sft")
+def export_sft():
+    return build_sft_export()
