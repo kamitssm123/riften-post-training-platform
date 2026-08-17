@@ -1,0 +1,61 @@
+@import "tailwindcss";
+
+:root {
+  --bg: #000000;
+  --bg-raised: #0a0a0a;
+  --bg-hover: #131313;
+  --border: #262626;
+  --border-strong: #3a3a3a;
+  --text: #ededed;
+  --text-dim: #8a8a8a;
+  --text-faint: #555555;
+
+  /* Single accent, used sparingly, only for state. */
+  --accent: #ff5d3a;
+  --accent-dim: #7a2c1c;
+
+  --mono: ui-monospace, "SF Mono", "Berkeley Mono", Consolas, monospace;
+  --sans: -apple-system, "Inter", "Segoe UI", Helvetica, Arial, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 13px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+::selection {
+  background: var(--accent-dim);
+  color: #fff;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: var(--bg);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 5px;
+}
+
+code,
+pre {
+  font-family: var(--mono);
+}
