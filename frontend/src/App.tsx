@@ -1,10 +1,15 @@
+import { FileWarning, Sparkles } from "lucide-react";
 import { useEffect, useState } from "react";
 import { fetchExclusionReport, fetchSession, fetchStats, fetchTrace, fetchTraces } from "./api/client";
 import { ExclusionPanel } from "./components/ExclusionPanel";
 import { FilterRail } from "./components/FilterRail";
+import { Pagination } from "./components/Pagination";
 import { SessionThread } from "./components/SessionThread";
+import { StatsOverview } from "./components/StatsOverview";
+import { ThemeSwitcher } from "./components/ThemeSwitcher";
 import { TraceDetail } from "./components/TraceDetail";
 import { TraceTable } from "./components/TraceTable";
+import { useTheme } from "./hooks/useTheme";
 import type { ExclusionReport } from "./types/exclusion";
 import {
   EMPTY_FILTERS,
@@ -24,6 +29,7 @@ type Panel =
   | { kind: "exclusions" };
 
 export default function App() {
+  const { theme, setTheme } = useTheme();
   const [filters, setFilters] = useState<TraceFilters>(EMPTY_FILTERS);
   const [page, setPage] = useState(1);
   const [traces, setTraces] = useState<TraceSummary[]>([]);
@@ -117,25 +123,40 @@ export default function App() {
 
   return (
     <div className="flex h-screen flex-col">
-      <header className="flex items-center justify-between border-b border-[var(--border)] px-4 py-3">
-        <div className="flex items-baseline gap-3">
-          <span className="text-[14px] font-semibold tracking-tight">riften</span>
-          <span className="text-[12px] text-[var(--text-faint)]">trace inspector</span>
+      <header
+        className="glass flex shrink-0 items-center justify-between border-b px-5 py-2.5"
+        style={{
+          borderColor: "var(--border)",
+          background: "var(--header-bg)",
+        }}
+      >
+        <div className="flex items-center gap-3">
+          <img src="/favicon.svg" alt="riften" className="h-8 w-8 drop-shadow-sm" />
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-[15px] font-bold tracking-tight">riften</span>
+              <span className="chip">
+                <Sparkles size={9} />
+                Trace Inspector
+              </span>
+            </div>
+          </div>
         </div>
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-2">
           <button
             onClick={() => setPanel({ kind: "exclusions" })}
-            className={`text-[11px] transition-colors ${
-              panel.kind === "exclusions"
-                ? "text-[var(--accent)]"
-                : "text-[var(--text-faint)] hover:text-[var(--text)]"
+            className={`btn flex items-center gap-1.5 !text-[11px] ${
+              panel.kind === "exclusions" ? "btn-active" : ""
             }`}
           >
+            <FileWarning size={13} />
             Exclusion report
           </button>
-          <div className="text-[11px] text-[var(--text-faint)]">
-            synthetic corpus &middot; no production traffic
-          </div>
+          <div className="hidden h-5 w-px sm:block" style={{ background: "var(--border)" }} />
+          <span className="chip hidden sm:inline-flex">
+            synthetic corpus · no production traffic
+          </span>
+          <ThemeSwitcher theme={theme} onChange={setTheme} />
         </div>
       </header>
 
@@ -147,39 +168,55 @@ export default function App() {
           resultCount={total}
         />
 
-        <main className="flex min-h-0 flex-1 flex-col">
-          <div className={tableLoading ? "flex-1 overflow-auto opacity-50" : "flex-1 overflow-auto"}>
-            <TraceTable
-              traces={traces}
-              onSelect={(id) => setPanel({ kind: "trace", id })}
-              selectedId={panel.kind === "trace" ? panel.id : null}
-            />
-          </div>
-          <div className="flex items-center justify-between border-t border-[var(--border)] px-4 py-2 text-[11px] text-[var(--text-faint)]">
-            <span>
-              Page {page} of {totalPages} &middot; {total} traces
-            </span>
-            <div className="flex gap-2">
-              <button
-                disabled={page <= 1}
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
-                className="rounded-sm border border-[var(--border)] px-2 py-1 disabled:opacity-30"
-              >
-                prev
-              </button>
-              <button
-                disabled={page >= totalPages}
-                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                className="rounded-sm border border-[var(--border)] px-2 py-1 disabled:opacity-30"
-              >
-                next
-              </button>
+        <main className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden p-4">
+          <StatsOverview stats={stats} resultCount={total} />
+
+          <div
+            className="relative min-h-0 flex-1 overflow-hidden rounded-xl border"
+            style={{ borderColor: "var(--border)", background: "var(--bg-raised)" }}
+          >
+            {tableLoading && (
+              <div className="pointer-events-none absolute inset-x-0 top-0 z-20 h-0.5 overflow-hidden rounded-t-xl">
+                <div
+                  className="h-full w-1/3 animate-[shimmer_1s_ease-in-out_infinite]"
+                  style={{
+                    background: "linear-gradient(90deg, transparent, var(--brand), transparent)",
+                  }}
+                />
+              </div>
+            )}
+            <div className={`h-full overflow-auto ${tableLoading ? "opacity-70 transition-opacity" : ""}`}>
+              <TraceTable
+                traces={traces}
+                loading={tableLoading}
+                onSelect={(id) => setPanel({ kind: "trace", id })}
+                selectedId={panel.kind === "trace" ? panel.id : null}
+              />
             </div>
+          </div>
+
+          <div
+            className="flex shrink-0 items-center justify-between rounded-xl border px-4 py-2.5 text-[11px]"
+            style={{
+              borderColor: "var(--border)",
+              background: "var(--bg-raised)",
+            }}
+          >
+            <span className="text-[var(--text-faint)]">
+              Page <span className="font-semibold text-[var(--text)]">{page}</span> of{" "}
+              <span className="font-semibold text-[var(--text)]">{totalPages}</span>
+              <span className="mx-2 text-[var(--border-strong)]">·</span>
+              <span className="font-semibold text-[var(--text)]">{total}</span> traces
+            </span>
+            <Pagination page={page} totalPages={totalPages} onChange={setPage} />
           </div>
         </main>
 
         {panel.kind !== "none" && (
-          <div className="w-[520px] shrink-0 border-l border-[var(--border)]">
+          <div
+            className="panel-surface w-[540px] shrink-0 border-l shadow-xl animate-fade-in"
+            style={{ borderColor: "var(--border)" }}
+          >
             {panel.kind === "trace" && (
               <TraceDetail
                 trace={traceDetail}
