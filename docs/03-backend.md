@@ -249,6 +249,44 @@ Each is a one-line wrapper: no request body, no params, calls the
 corresponding `build_*` function from the export modules and returns its
 dict as-is. See `docs/07-exports.md` for the full response shape of each.
 
+## `exclusion_rules.py`
+
+**Purpose**: single source of truth for the SFT and preference-pair
+exclusion rules, extracted out of `export_sft.py`/`export_preference.py` so
+`GET /traces/{trace_id}/export-preview` can compute the exact same fate for
+one trace that a real export run would give it, without a second
+implementation. Pure functions, no I/O.
+
+| Reads | Writes |
+|---|---|
+| nothing (operates on an in-memory `list[dict]` of already-fetched traces) | nothing |
+
+- `select_session_representative(session_traces)` and
+  `row_level_exclusion_reason(trace, all_traces_by_id)` — moved here
+  verbatim from `export_sft.py`; behavior unchanged. Full algorithm
+  walkthrough in `docs/07-exports.md`.
+- `retrial_winner_of(trace_id, all_traces_by_id)` — new helper, finds the
+  trace (if any) whose `retrial_of` points back at `trace_id`; used so the
+  preview can name *which* retrial superseded a given trace, not just that
+  one did.
+- `compute_sft_plan(traces)` — runs the full session-collapse +
+  row-level-exclusion algorithm once and returns `kept_rows`,
+  `excluded_by_reason` (same shape `build_sft_export()` has always
+  returned), `total_sessions`, and a `per_trace` map (`trace_id ->
+  {included, reason, superseded_by_trace_id}`) giving every trace's SFT
+  fate. `export_sft.py` uses `kept_rows`/`excluded_by_reason` to write
+  `sft.jsonl`; `export_preview.py` reads `per_trace`.
+- `make_preference_pair(chosen, rejected, source)` — moved here verbatim
+  from `export_preference.py`'s `make_pair`; `export_preference.py` keeps a
+  `make_pair = make_preference_pair` alias for backward compatibility.
+- `compute_preference_plan(traces)` — runs the full three-pass pairing
+  algorithm once and returns `pairs`, `excluded_by_reason`,
+  `pairs_by_source`, and a `per_trace` map (`trace_id -> {eligible, role,
+  source, paired_with_trace_id}` for a trace that was chosen or rejected on
+  some pair; `{eligible: False, ..., exclusion_reason: "no_pairing_candidate"}`
+  for a weak/rejected-continuation trace that found no partner; absent
+  entirely for a trace never considered on either side of a pair).
+
 ## `export_sft.py`
 
 Covered in full step-by-step detail with worked examples in
@@ -258,19 +296,19 @@ Covered in full step-by-step detail with worked examples in
 |---|---|
 | `/data/traces.db` (via `ingest.get_connection`) | `/data/exports/sft.jsonl` |
 
-- `fetch_all_traces()` (lines 31-37) — `SELECT * FROM traces`, no filter,
-  inflated via `Trace.from_row`. Also imported by `export_preference.py`.
-- `select_session_representative(session_traces)` (lines 40-76) — per
-  session, picks the one "kept" trace and returns `(kept, superseded)`.
-- `row_level_exclusion_reason(trace, all_traces_by_id)` (lines 79-91) —
-  checks, in order, `non_2xx_response` → `truncated_response` →
-  `rejected_continuation` → `superseded_by_retrial`, returning the first
-  match or `None`.
-- `build_sft_export()` (lines 94-138) — orchestrates the above per session,
-  writes `sft.jsonl`, returns the summary dict consumed by `main.py` and
-  `exclusion_report.py`.
-- `main()` (lines 141-152) — CLI entry point, prints a one-line summary plus
-  one line per exclusion reason.
+- `fetch_all_traces()` — `SELECT * FROM traces`, no filter, inflated via
+  `Trace.from_row`. Also imported by `export_preference.py` and
+  `main.py` (for the export-preview route).
+- `select_session_representative` / `row_level_exclusion_reason` are
+  re-exported from `exclusion_rules.py` (see above) for any code that
+  imported them from `export_sft` before the refactor.
+- `build_sft_export()` — calls `exclusion_rules.compute_sft_plan(traces)`,
+  writes `kept_rows` to `sft.jsonl`, returns the summary dict consumed by
+  `main.py` and `exclusion_report.py`. The write-to-file step is the only
+  thing left in this module; the exclusion logic itself now lives in
+  `exclusion_rules.py`.
+- `main()` — CLI entry point, prints a one-line summary plus one line per
+  exclusion reason.
 
 ## `export_preference.py`
 
@@ -278,14 +316,83 @@ Covered in full step-by-step detail with worked examples in
 |---|---|
 | `/data/traces.db` (via `export_sft.fetch_all_traces`) | `/data/exports/preference.jsonl` |
 
-- `make_pair(chosen, rejected, source)` (lines 22-36) — builds one output
-  record; see `docs/07-exports.md` for the exact JSON shape.
-- `build_preference_export()` (lines 39-110) — three sequential passes over
-  `traces` (retrial, weak-rating, rejected-continuation), each guarded by a
-  shared `used_rejected_ids` set so a trace already paired by an earlier
-  pass isn't paired again by a later one. Full algorithm walkthrough in
-  `docs/07-exports.md`.
-- `main()` (lines 113-126) — CLI entry point.
+- `make_pair` — alias for `exclusion_rules.make_preference_pair`.
+- `build_preference_export()` — calls
+  `exclusion_rules.compute_preference_plan(traces)`, writes `pairs` to
+  `preference.jsonl`, returns the summary dict. As with `export_sft.py`,
+  the three-pass pairing algorithm itself now lives in `exclusion_rules.py`;
+  this module only handles fetching and writing. Full algorithm walkthrough
+  in `docs/07-exports.md`.
+- `main()` — CLI entry point.
+
+## `export_preview.py`
+
+**Purpose**: backs `GET /traces/{trace_id}/export-preview`. Runs
+`exclusion_rules.compute_sft_plan()` and `compute_preference_plan()` over
+the *entire* corpus (same as a real export would), then reads off the one
+requested trace's entry from each plan's `per_trace` map — so the preview
+can never diverge from what an actual `POST /export/sft` /
+`POST /export/preference` run would do to that trace, and adding this
+endpoint doesn't change either `.jsonl` output.
+
+| Reads | Writes |
+|---|---|
+| nothing (operates on the `list[dict]` passed in by the caller) | nothing |
+
+- `SFT_REASON_DETAIL` — a `{reason: (trace, plan_entry) -> str}` map of
+  human-readable detail strings, one per SFT exclusion reason. The
+  `superseded_by_retrial` and `superseded_by_longer_session_trace` entries
+  name the specific trace that superseded this one, using
+  `plan_entry["superseded_by_trace_id"]`.
+- `build_sft_preview(trace_id, all_traces)` / `build_preference_preview(trace_id,
+  all_traces)` — look up `trace_id` in the corresponding plan's `per_trace`
+  map and shape the response.
+- `build_export_preview(trace_id, all_traces)` — combines both into
+  `{"sft": {...}, "preference": {...}}`, the full response body for the
+  route. See `docs/07-exports.md` for the JSON shape.
+
+## `model_tradeoff.py`
+
+**Purpose**: backs `GET /stats/model-tradeoff` — average cost vs. average
+quality per model, the one analysis that validates Riften's cost-aware
+routing pitch using this project's own trace data.
+
+| Reads | Writes |
+|---|---|
+| `/data/traces.db` (via a connection passed in by the caller) | nothing |
+
+- `QUALITY_SCORE_SQL` — a SQL `CASE feedback WHEN 'weak' THEN 0.0 WHEN 'ok'
+  THEN 0.5 WHEN 'strong' THEN 1.0 ELSE NULL END` expression; `AVG()` over
+  this skips `NULL` rows automatically, which is what makes
+  `avg_quality_score` an average over only the traces that carry feedback,
+  not over all of a model's traces.
+- `MODEL_TRADEOFF_SQL` — one `GROUP BY model` query computing
+  `trace_count`, `avg_cost_usd`, `avg_latency_ms`, `avg_tokens_prompt`,
+  `avg_tokens_completion`, a `feedback_count` (used to derive
+  `feedback_coverage`, not returned itself), `avg_quality_score`,
+  `error_rate` (`AVG` of a `status_code NOT IN [200,300)` indicator), and
+  `truncation_rate` (`AVG` of a `finish_reason = 'length'` indicator).
+- `compute_model_tradeoff(conn)` — runs `MODEL_TRADEOFF_SQL`, derives
+  `feedback_coverage = feedback_count / trace_count`, rounds every float
+  field, and leaves `avg_quality_score` as `None` (rather than `0.0`) for a
+  model with zero feedback coverage — the frontend renders that as "no
+  feedback data" rather than a misleadingly low score.
+
+### `GET /stats/model-tradeoff` — `get_model_tradeoff`
+
+No params. Calls `model_tradeoff.compute_model_tradeoff(conn)` and returns
+`{"items": ModelTradeoff[]}`, one entry per distinct `model` in the traces
+table. See `docs/07-exports.md` for the field-by-field JSON shape.
+
+### `GET /traces/{trace_id}/export-preview` — `get_trace_export_preview`
+
+404s with `{"detail": "trace not found"}` if `trace_id` doesn't exist
+(checked with a lightweight `SELECT 1` before doing the full-corpus scan).
+Otherwise calls `export_sft.fetch_all_traces()` once and passes the result
+to `export_preview.build_export_preview(trace_id, all_traces)`. Read-only —
+does not write `sft.jsonl`/`preference.jsonl`/`exclusion_report.md`, unlike
+`POST /export/sft`/`POST /export/preference`/`GET /export/exclusions`,
+which all rewrite those files as a side effect.
 
 ## `exclusion_report.py`
 
@@ -316,9 +423,11 @@ Covered in full step-by-step detail with worked examples in
 | `test_export_sft.py` | 113 | 6 tests: turn-index collapsing, the retrial tiebreak at equal turn_index, each of the 4 row-level exclusion reasons individually, and a metadata-leak check confirming `messages` never contains a `feedback`/other metadata key. |
 | `test_export_preference.py` | 140 | 6 tests: retrial pairing, weak-rating pairing when a same-turn candidate exists, weak-rating logged as `no_pairing_candidate` when none exists, continuation-rejected pairing, a same-session-different-turn case proving pairing does *not* cross turn boundaries, and an output-shape check on the written JSONL. |
 | `test_exclusion_report.py` | 95 | 3 tests: the sum-to-total invariant on a synthetic 3-trace fixture, presence of both `sft`/`preference` top-level keys, and that `render_markdown` doesn't raise and contains both section headers. |
+| `test_model_tradeoff.py` | new | 1 test: `compute_model_tradeoff` against a known 3-trace, 2-model fixture, asserting every aggregate (`avg_cost_usd`, `avg_latency_ms`, `avg_tokens_prompt`/`completion`, `avg_quality_score`, `feedback_coverage`, `error_rate`, `truncation_rate`) by hand-computed expected value, including the no-feedback-data case (`avg_quality_score is None`, `feedback_coverage == 0.0`) for the model with no feedback. |
+| `test_export_preview.py` | new | 4 tests against `export_preview.build_export_preview`: the `superseded_by_longer_session_trace` case names the specific superseding trace_id in `detail`; an included trace reports `included: True`; a retrial pair reports the correct `role`/`source`/`paired_with_trace_id` for the rejected side; a trace never considered on either side of a pair reports `eligible: False`. |
 
-All four test files define their own local `trace(**overrides)` fixture
-builder (or `FIXTURE_TRACES` list) rather than sharing one — there's no
+All test files define their own local `trace(**overrides)` fixture builder
+(or `FIXTURE_TRACES` list) rather than sharing one — there's no
 `conftest.py` in this repo, so each test module duplicates a full trace-dict
 skeleton with sensible defaults, wired to accept keyword overrides for the
 specific fields each test cares about.

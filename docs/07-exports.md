@@ -1,5 +1,18 @@
 # Exports
 
+**Shared exclusion-rule module**: the session-collapse algorithm
+(`select_session_representative`), the SFT row-level exclusion checks
+(`row_level_exclusion_reason`), and the preference three-pass pairing
+algorithm now live in `backend/exclusion_rules.py` as
+`compute_sft_plan(traces)` and `compute_preference_plan(traces)`, extracted
+out of `export_sft.py`/`export_preference.py` in a pure refactor (verified
+byte-identical `sft.jsonl`/`preference.jsonl`/`exclusion_report.md` output
+before and after). Both real export scripts and the new
+`GET /traces/{trace_id}/export-preview` route (documented at the bottom of
+this file) call these same functions — the algorithm descriptions below are
+still accurate, just relocated. See `docs/03-backend.md`'s
+`exclusion_rules.py` section for the module's own API.
+
 ## SFT export (`export_sft.py`)
 
 ### Step-by-step algorithm, as implemented
@@ -290,6 +303,81 @@ Current corpus, reproduced from the live `/data/exports/exclusion_report.md`
 | `metadata.chosen_model` / `rejected_model` | the model that produced each side — can differ (the retrial example above pairs `llama-3.1-70b` against `gpt-4o-mini`), since a retrial can be re-routed to a different model on the second attempt. |
 | `metadata.chosen_feedback` / `rejected_feedback` | each side's `feedback` field, independently — not constrained to be non-null. |
 | `metadata.chosen_cost_usd` / `rejected_cost_usd` | each side's `cost_usd`. |
+
+## Live per-trace export preview (`GET /traces/{trace_id}/export-preview`)
+
+A read-only, single-trace view over the same exclusion rules described
+above, backed by `export_preview.py`. Where the exclusion report only shows
+what was *already* excluded after an export ran, this endpoint lets a
+reviewer click any trace in the inspector and see its fate in both exports
+before ever running one — same rule functions
+(`exclusion_rules.compute_sft_plan`/`compute_preference_plan`), no export
+files written as a side effect (unlike `POST /export/sft`,
+`POST /export/preference`, and `GET /export/exclusions`, which all rewrite
+`sft.jsonl`/`preference.jsonl`/`exclusion_report.md`).
+
+Response shape — both top-level keys always present, since a trace can be
+excluded from one export and included/eligible in the other:
+
+```json
+{
+  "sft": {
+    "included": false,
+    "reason": "truncated_response",
+    "detail": "finish_reason is 'length'"
+  },
+  "preference": {
+    "eligible": true,
+    "role": "rejected",
+    "source": "retrial",
+    "paired_with_trace_id": "83754fa1-089d-46a6-9b7f-52702afc6eb1",
+    "detail": "rejected side of a retrial pair, paired with trace 83754fa1-089d-46a6-9b7f-52702afc6eb1"
+  }
+}
+```
+
+| Field | Source |
+|---|---|
+| `sft.included` | `True` iff this trace is the one written to `sft.jsonl` for its session. |
+| `sft.reason` | `null` when included; otherwise one of `superseded_by_longer_session_trace`, `non_2xx_response`, `truncated_response`, `rejected_continuation`, `superseded_by_retrial` — the same reason vocabulary as the exclusion report. |
+| `sft.detail` | Human-readable explanation. For the two "another trace took precedence" reasons (`superseded_by_longer_session_trace`, `superseded_by_retrial`) this **names the specific trace_id** that superseded it — e.g. "trace `8a8d1b58-...` in the same session has a higher turn_index and was kept as the session's representative instead" — this is the case the feature spec calls out as most worth getting right, since it's the least obvious to a non-technical reviewer looking at a raw exclusion count. |
+| `preference.eligible` | `True` iff this trace was chosen or rejected on some preference pair. |
+| `preference.role` | `"chosen"` or `"rejected"` when eligible, else `null`. |
+| `preference.source` | `"retrial"`, `"weak_rating"`, or `"continuation_rejected"` when eligible, else `null`. |
+| `preference.paired_with_trace_id` | The other side's `trace_id` when eligible, else `null`. |
+| `preference.detail` | Human-readable explanation, including the `"no pairing candidate at the same session + turn_index"` case for a weak/rejected-continuation trace that was logged under `no_pairing_candidate` rather than paired. |
+
+A trace that is both superseded in its session *and* the rejected side of a
+retrial pair (the common shape for a retrial loser, since the retrial
+winner is what advances the session's turn_index) reports both
+independently — `sft.included: false` with `reason:
+"superseded_by_longer_session_trace"` (session-collapse always runs before
+the row-level check, so that's the reason that wins) alongside
+`preference.eligible: true`, since preference pairing is a completely
+separate pass over the same trace list. Real example: trace
+`670369d9-badf-49fc-929d-32eb2eca0d3f` from the retrial pair documented
+above — excluded from `sft.jsonl` (superseded by `8a8d1b58-...`, the
+session's turn-2 representative) but present in `preference.jsonl` as the
+`rejected` side of the `retrial` pair against `83754fa1-...`.
+
+Frontend: `TraceDetail` fetches this automatically (via `App.tsx`,
+alongside the trace itself) whenever a trace is opened and renders it as
+two badges — see `docs/04-frontend.md`'s `ExportPreviewBadges` section.
+
+## Cost/quality tradeoff (`GET /stats/model-tradeoff`)
+
+Not an export and doesn't touch exclusion logic at all — listed here
+because, like the preview above, it's a read view over the same trace data
+that motivates the exports (validating that cheaper models are actually
+worth routing to is the reason a cost-aware SFT/preference dataset matters
+in the first place). Backed by `backend/model_tradeoff.py`; full field
+list and SQL in `docs/03-backend.md`'s `model_tradeoff.py` section.
+Response: `{"items": ModelTradeoff[]}`, one entry per distinct `model`,
+each with `trace_count`, `avg_cost_usd`, `avg_latency_ms`,
+`avg_tokens_prompt`/`avg_tokens_completion`, `avg_quality_score` (`null`
+when the model has zero feedback coverage, never a misleading `0.0`),
+`feedback_coverage`, `error_rate`, `truncation_rate`. Frontend:
+`ModelTradeoffView`/`ModelTradeoffChart` — see `docs/04-frontend.md`.
 
 ### Why `metadata` is a sibling key, not embedded in `messages`
 

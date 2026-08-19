@@ -7,19 +7,27 @@ All paths relative to `/frontend/src` unless noted.
 ```
 main.tsx
   └── App.tsx                                    (owns all state; see "State management" below)
-        ├── <header>                              (inline JSX, not extracted — wordmark + "Exclusion report" nav button)
-        ├── FilterRail                            (components/FilterRail.tsx)
-        │     ├── FilterSection ×5                 (private, module-local)
-        │     ├── ToggleRow ×2                      (private)
-        │     └── RangeInputs ×2                    (private)
-        ├── <main>
-        │     ├── TraceTable                       (components/TraceTable.tsx)
-        │     │     └── TraceStatusBadges           (components/StatBadge.tsx, exported alongside StatBadge)
-        │     │           └── StatBadge ×N
-        │     └── pagination bar                    (inline JSX in App.tsx)
+        ├── <header>                              (inline JSX, not extracted — wordmark + Traces/Model tradeoff/Exclusion report nav buttons)
+        ├── mainView === "traces":
+        │     ├── FilterRail                       (components/FilterRail.tsx)
+        │     │     ├── FilterSection ×5             (private, module-local)
+        │     │     ├── ToggleRow ×2                  (private)
+        │     │     └── RangeInputs ×2                (private)
+        │     └── <main>
+        │           ├── TraceTable                   (components/TraceTable.tsx)
+        │           │     └── TraceStatusBadges       (components/StatBadge.tsx, exported alongside StatBadge)
+        │           │           └── StatBadge ×N
+        │           └── pagination bar                (inline JSX in App.tsx)
+        ├── mainView === "tradeoff":
+        │     └── ModelTradeoffView                  (components/ModelTradeoffView.tsx)
+        │           ├── ModelTradeoffChart             (components/ModelTradeoffChart.tsx)
+        │           │     └── Tooltip ×N                 (components/ui/Tooltip.tsx, one per plotted point)
+        │           └── table (inline JSX)
         └── right panel (conditionally one of, based on `panel.kind`):
               ├── TraceDetail                       (components/TraceDetail.tsx)
               │     ├── MessageBubble ×N              (private, module-local)
+              │     ├── ExportPreviewBadges           (components/ExportPreviewBadges.tsx)
+              │     │     └── StatBadge ×2              (components/StatBadge.tsx)
               │     └── StatBadge ×N                  (components/StatBadge.tsx)
               ├── SessionThread                      (components/SessionThread.tsx)
               │     └── StatBadge ×N
@@ -31,8 +39,12 @@ main.tsx
 There is no router and no nested route components — the "page" is always
 `App.tsx`; navigation between trace detail / session thread / exclusion
 report is modeled as a single `panel` state value (a discriminated union,
-`App.tsx:20-24`) that swaps which component renders in the right-hand
-column.
+`App.tsx`) that swaps which component renders in the right-hand column, and
+independently a `mainView: "traces" | "tradeoff"` state value swaps which
+content fills the main (non-panel) area. The two are orthogonal — switching
+`mainView` does not close whatever `panel` is open, so a trace detail panel
+opened from the Traces tab stays open while browsing the Model tradeoff
+tab.
 
 ## `main.tsx`
 
@@ -57,21 +69,33 @@ The only stateful component in the app. Owns:
 | `session` | `SessionResponse \| null` | resolved `fetchSession()` response, only relevant when `panel.kind === "session"` |
 | `exclusionReport` | `ExclusionReport \| null` | resolved `fetchExclusionReport()` response, only relevant when `panel.kind === "exclusions"` |
 | `panelLoading` | `boolean` | true while any of the three panel fetches above is in flight |
+| `mainView` | `"traces" \| "tradeoff"` | the header's "Traces"/"Model tradeoff" nav buttons |
+| `tradeoff` | `ModelTradeoff[] \| null` | resolved `fetchModelTradeoff()` response, only fetched while `mainView === "tradeoff"` |
+| `tradeoffLoading` | `boolean` | true while the tradeoff fetch is in flight |
+| `exportPreview` | `ExportPreview \| null` | resolved `fetchExportPreview(traceId)` response, fetched alongside `traceDetail` whenever `panel.kind === "trace"` |
+| `exportPreviewLoading` | `boolean` | true while the export-preview fetch is in flight |
 
-Four `useEffect` hooks:
-1. `[filters]` → reset `page` to 1 (lines 40-42).
-2. `[filters, page]` → `fetchTraces`, sets `traces`/`total`/`tableLoading`
-   (lines 44-56).
-3. `[filters]` → `fetchStats`, sets `stats` (lines 58-66). Runs in parallel
+Six `useEffect` hooks:
+1. `[filters]` → reset `page` to 1.
+2. `[filters, page]` → `fetchTraces`, sets `traces`/`total`/`tableLoading`.
+3. `[filters]` → `fetchStats`, sets `stats`. Runs in parallel
    with #2 on every filter change (both keyed on `filters`, but this one
    isn't also keyed on `page` — changing page alone does not refetch stats).
-4. `[panel]` → branches on `panel.kind`; for `"trace"`/`"session"`/`"exclusions"`
-   fires the matching fetch and clears the other two panel state slots; for
-   `"none"` clears `traceDetail` and `session` (lines 68-114). Every branch
-   uses a local `cancelled` flag closed over the effect's cleanup function
-   to avoid setting state after a newer panel selection has superseded an
-   in-flight request — standard React fetch-in-effect race guard, not a
-   library.
+4. `[mainView]` → fires only when `mainView === "tradeoff"`; calls
+   `fetchModelTradeoff()`, sets `tradeoff`/`tradeoffLoading`. Fetched once
+   per switch into the tab, not re-fetched on every render, and not
+   filtered by the Traces tab's `filters` state (the tradeoff view has no
+   filter UI — it always summarizes the whole corpus).
+5. `[panel]` → branches on `panel.kind`; for `"trace"` fires **two**
+   parallel fetches (`fetchTrace` and `fetchExportPreview`, both keyed off
+   the same `panel.id`) so the export-eligibility badges load automatically
+   alongside the transcript rather than needing a separate action; for
+   `"session"`/`"exclusions"` fires the matching single fetch; clears the
+   other panel state slots on every branch, including `exportPreview` on
+   the final "none" fallthrough. Every branch uses a local `cancelled` flag
+   closed over the effect's cleanup function to avoid setting state after a
+   newer panel selection has superseded an in-flight request — standard
+   React fetch-in-effect race guard, not a library.
 
 No `try`/`catch` around any fetch call, and no error state anywhere in the
 component — a failed request just leaves the relevant `useState` at its
@@ -87,16 +111,18 @@ based on `panel.kind` (lines 181-208).
 
 ## `api/client.ts`
 
-The entire HTTP layer — five exported async functions, no class, no
+The entire HTTP layer — seven exported async functions, no class, no
 generated client, no caching layer:
 
 | Function | Route | Called from |
 |---|---|---|
 | `fetchTraces(filters, page, pageSize)` | `GET /api/traces?...` | `App.tsx` effect #2 |
-| `fetchTrace(traceId)` | `GET /api/traces/{id}` | `App.tsx` effect #4, `panel.kind === "trace"` |
-| `fetchSession(sessionId)` | `GET /api/sessions/{id}` | `App.tsx` effect #4, `panel.kind === "session"` |
+| `fetchTrace(traceId)` | `GET /api/traces/{id}` | `App.tsx` effect #5, `panel.kind === "trace"` |
+| `fetchSession(sessionId)` | `GET /api/sessions/{id}` | `App.tsx` effect #5, `panel.kind === "session"` |
 | `fetchStats(filters)` | `GET /api/stats?...` | `App.tsx` effect #3 |
-| `fetchExclusionReport()` | `GET /api/export/exclusions` | `App.tsx` effect #4, `panel.kind === "exclusions"` |
+| `fetchExclusionReport()` | `GET /api/export/exclusions` | `App.tsx` effect #5, `panel.kind === "exclusions"` |
+| `fetchModelTradeoff()` | `GET /api/stats/model-tradeoff` | `App.tsx` effect #4, `mainView === "tradeoff"` |
+| `fetchExportPreview(traceId)` | `GET /api/traces/{id}/export-preview` | `App.tsx` effect #5, `panel.kind === "trace"` (alongside `fetchTrace`) |
 
 `filtersToParams(filters, extra?)` (lines 12-27) is the one piece of shared
 logic: it builds a `URLSearchParams` from a `Partial<TraceFilters>`,
@@ -169,23 +195,47 @@ match `EMPTY_FILTERS`'s shape).
 
 ## `components/TraceDetail.tsx`
 
-Props: `{trace: TraceDetailT | null, loading: boolean, onOpenSession:
-(sessionId: string) => void, onClose: () => void}`. No local state. Three
-render branches: `loading` → centered "Loading…" text; `!trace` → centered
-"Select a trace to inspect it." (the initial/no-selection state); otherwise
-the populated view: a header row with the `trace_id`, computed
-`errored`/`truncated` badges plus `feedback`/`is_retrial`/
-`continuation_status` badges, and a button reading `session {id} → turn
-{turn_index}` that calls `onOpenSession` (this is the only way to reach the
-session view from the UI); a 4-column metadata grid (Model, Status, Finish,
-Latency, Prompt tok, Completion tok, Cost, Timestamp — 8 cells in a
-4-column grid, lines 80-88); the transcript, rendered as one `MessageBubble`
-per entry in `trace.messages` plus one more for `trace.response` (labelled
-`"assistant (response)"` rather than reusing the `"assistant"` role string,
-so it's visually distinguishable from an assistant turn that was already
-part of the resent context); and, if `tool_calls` is non-empty, a Tool
-calls section listing each call's name, a status badge, and pretty-printed
+Props: `{trace: TraceDetailT | null, loading: boolean, exportPreview:
+ExportPreview | null, exportPreviewLoading: boolean, onOpenSession:
+(sessionId: string) => void, onSelectTrace: (traceId: string) => void,
+onClose: () => void}`. No local state. Three render branches: `loading` →
+centered "Loading…" text; `!trace` → centered "Select a trace to inspect
+it." (the initial/no-selection state); otherwise the populated view: a
+header row with the `trace_id`, computed `errored`/`truncated` badges plus
+`feedback`/`is_retrial`/`continuation_status` badges, an `ExportPreviewBadges`
+row (see below), and a button reading `session {id} → turn {turn_index}`
+that calls `onOpenSession` (this is the only way to reach the session view
+from the UI); a 4-column metadata grid (Model, Status, Finish, Latency,
+Prompt tok, Completion tok, Cost, Timestamp — 8 cells in a 4-column grid);
+the transcript, rendered as one `MessageBubble` per entry in
+`trace.messages` plus one more for `trace.response` (labelled `"assistant
+(response)"` rather than reusing the `"assistant"` role string, so it's
+visually distinguishable from an assistant turn that was already part of
+the resent context); and, if `tool_calls` is non-empty, a Tool calls
+section listing each call's name, a status badge, and pretty-printed
 `args`/`result.output` JSON in `<pre>` blocks.
+
+## `components/ExportPreviewBadges.tsx`
+
+Props: `{preview: ExportPreview | null, loading: boolean, onSelectTrace:
+(traceId: string) => void}`. Renders inside `TraceDetail`'s header,
+immediately below the error/truncated/feedback badge row, and fetches
+nothing itself — `App.tsx` fetches `fetchExportPreview(traceId)` in the
+same effect that fetches the trace, so this section populates automatically
+the moment a trace is opened rather than requiring a separate click. Two
+`StatBadge`s: one for `preview.sft` (`"SFT: included"` in `success` tone,
+or `"SFT: excluded — {reason}"` in `error` tone, each wrapped in a
+`Tooltip` showing `preview.sft.detail` — the human-readable explanation,
+e.g. naming the specific superseding trace_id for
+`superseded_by_longer_session_trace`); one for `preview.preference`
+(`"Preference: eligible — {role} side ({source})"` in `info` tone when
+`eligible`, `"Preference: not eligible"` in `dim` tone otherwise). When
+eligible and `paired_with_trace_id` is set, a small button reading `paired
+with #{shortId}` sits next to the preference badge and calls
+`onSelectTrace(paired_with_trace_id)` — in `App.tsx` this is wired to the
+same `(id) => setPanel({kind: "trace", id})` handler used everywhere else,
+so clicking it swaps the detail panel straight to the paired trace (the
+chosen or rejected counterpart of the same pair).
 
 ## `components/SessionThread.tsx`
 
@@ -214,6 +264,56 @@ panel from the exclusion report straight into that trace's detail view.
 The panel itself has two `<section>`s (SFT export, Preference pair export),
 each showing summary counts above its `ReasonTable`.
 
+## `components/ModelTradeoffView.tsx`
+
+Props: `{items: ModelTradeoff[] | null, loading: boolean}`. Rendered by
+`App.tsx` in place of `FilterRail` + `TraceTable` when `mainView ===
+"tradeoff"` — this tab has no filters, since it always summarizes the
+whole corpus. Three render branches: `loading || !items` → skeleton cards;
+`items.length === 0` → empty-corpus state; otherwise a `Card` containing
+`ModelTradeoffChart` above a plain `<table>` with one row per model
+(Model, Traces, Avg cost, Avg latency, Avg quality, Error rate, Truncation
+rate, Avg prompt/completion tokens) — the table exists so anyone who wants
+exact figures doesn't have to read them off the scatter plot. The Avg
+quality cell (`QualityCell`, module-local) renders `"no feedback data"` in
+muted text instead of a bare `0.00` when `avg_quality_score` is `null`,
+otherwise the score plus a `(NN% coverage)` qualifier from
+`feedback_coverage` — the same "don't silently hide that the score is
+based on a subset" rule the chart follows.
+
+## `components/ModelTradeoffChart.tsx`
+
+Props: `{items: ModelTradeoff[]}`. A hand-rolled inline SVG scatter plot —
+no charting library is added; the frontend has none installed and this is
+a single scatter with five points, well within what plain SVG handles.
+X-axis is `avg_cost_usd` on a **log scale** (cost spans roughly two orders
+of magnitude across the five models, so a linear scale would collapse the
+cheap, high-volume models into a single pixel cluster); Y-axis is
+`avg_quality_score`, fixed `0`–`1`. Point radius encodes `trace_count`
+(`radiusFor`, `sqrt`-scaled so area rather than radius tracks volume
+linearly). Color is a **fixed** model→color assignment
+(`utils/modelColors.ts`) reusing the app's existing `--accent`/`--info`/
+`--brand`/`--success`/`--warning` tokens in `ALL_MODELS` order, rather than
+introducing a new palette — this keeps the chart in the same visual
+language as the rest of the inspector (status badges use the same five
+tokens for unrelated purposes) instead of adding a second color system. A
+model with `avg_quality_score === null` (zero feedback coverage) is
+**excluded from the plot entirely** rather than plotted at a misleading
+`y=0` — its name appears instead in a "Not plotted (no feedback coverage
+yet): …" note below the chart. Each point is wrapped in the existing
+`Tooltip` component (hover shows model, quality + coverage, cost, trace
+count); a legend row below the chart maps color → model name (no separate
+legend component — inline JSX, since this is the only place model colors
+are shown).
+
+## `utils/modelColors.ts`
+
+`colorForModel(model: string): string` — the fixed model→CSS-variable
+lookup described above. Not derived from `stats.per_model` or any
+API response; the assignment is a module-level constant built once from
+`ALL_MODELS`, so a model's color never changes based on which models
+happen to appear in the current result set.
+
 ## Types
 
 - `types/trace.ts` — `Model`, `FinishReason`, `Feedback`,
@@ -233,6 +333,17 @@ each showing summary counts above its `ReasonTable`.
   and `ExclusionReport` (`{sft: {...}, preference: {...}}`), mirroring the
   dict shape `exclusion_report.build_exclusion_report()` returns field for
   field.
+- `types/modelTradeoff.ts` — `ModelTradeoff` (one row per model: `model`,
+  `trace_count`, `avg_cost_usd`, `avg_latency_ms`, `avg_tokens_prompt`,
+  `avg_tokens_completion`, `avg_quality_score: number | null`,
+  `feedback_coverage`, `error_rate`, `truncation_rate`) and
+  `ModelTradeoffResponse` (`{items: ModelTradeoff[]}`), mirroring
+  `model_tradeoff.compute_model_tradeoff()`'s return shape field for field.
+- `types/exportPreview.ts` — `SftPreview` (`{included, reason, detail}`),
+  `PreferencePreview` (`{eligible, role, source, paired_with_trace_id,
+  detail}`), and `ExportPreview` (`{sft: SftPreview, preference:
+  PreferencePreview}`), mirroring `export_preview.build_export_preview()`'s
+  return shape field for field.
 
 ## Styling
 
