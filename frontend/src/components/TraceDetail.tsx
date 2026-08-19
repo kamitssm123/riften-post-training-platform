@@ -1,6 +1,8 @@
 import { ArrowRight, Bot, Copy, FileText, User, Wrench } from "lucide-react";
 import { useState } from "react";
+import type { ExportPreview } from "../types/exportPreview";
 import type { TraceDetail as TraceDetailT } from "../types/trace";
+import { ExportPreviewBadges } from "./ExportPreviewBadges";
 import { FeedbackBadge, StatBadge } from "./StatBadge";
 import { Card, CardContent } from "./ui/Card";
 import { LoadingSpinner } from "./ui/LoadingSpinner";
@@ -10,7 +12,10 @@ import { Tooltip } from "./ui/Tooltip";
 interface Props {
   trace: TraceDetailT | null;
   loading: boolean;
+  exportPreview: ExportPreview | null;
+  exportPreviewLoading: boolean;
   onOpenSession: (sessionId: string) => void;
+  onSelectTrace: (traceId: string) => void;
   onClose: () => void;
 }
 
@@ -66,7 +71,15 @@ function MetricBox({ label, value }: { label: string; value: string }) {
   );
 }
 
-export function TraceDetail({ trace, loading, onOpenSession, onClose }: Props) {
+export function TraceDetail({
+  trace,
+  loading,
+  exportPreview,
+  exportPreviewLoading,
+  onOpenSession,
+  onSelectTrace,
+  onClose,
+}: Props) {
   const [copied, setCopied] = useState(false);
 
   if (loading) {
@@ -131,6 +144,11 @@ export function TraceDetail({ trace, loading, onOpenSession, onClose }: Props) {
             />
           )}
         </div>
+        <ExportPreviewBadges
+          preview={exportPreview}
+          loading={exportPreviewLoading}
+          onSelectTrace={onSelectTrace}
+        />
         <button
           onClick={() => onOpenSession(trace.session_id)}
           className="btn mt-2.5 flex w-fit items-center gap-1.5 !text-[11px]"

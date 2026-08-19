@@ -2,6 +2,7 @@ import { FileWarning, Layers, LineChart, Sparkles } from "lucide-react";
 import { useEffect, useState } from "react";
 import {
   fetchExclusionReport,
+  fetchExportPreview,
   fetchModelTradeoff,
   fetchSession,
   fetchStats,
@@ -19,6 +20,7 @@ import { TraceDetail } from "./components/TraceDetail";
 import { TraceTable } from "./components/TraceTable";
 import { useTheme } from "./hooks/useTheme";
 import type { ExclusionReport } from "./types/exclusion";
+import type { ExportPreview } from "./types/exportPreview";
 import type { ModelTradeoff } from "./types/modelTradeoff";
 import {
   EMPTY_FILTERS,
@@ -56,6 +58,8 @@ export default function App() {
   const [session, setSession] = useState<SessionResponse | null>(null);
   const [exclusionReport, setExclusionReport] = useState<ExclusionReport | null>(null);
   const [panelLoading, setPanelLoading] = useState(false);
+  const [exportPreview, setExportPreview] = useState<ExportPreview | null>(null);
+  const [exportPreviewLoading, setExportPreviewLoading] = useState(false);
 
   useEffect(() => {
     setPage(1);
@@ -103,11 +107,18 @@ export default function App() {
     if (panel.kind === "trace") {
       let cancelled = false;
       setPanelLoading(true);
+      setExportPreviewLoading(true);
       setSession(null);
       fetchTrace(panel.id).then((res) => {
         if (!cancelled) {
           setTraceDetail(res);
           setPanelLoading(false);
+        }
+      });
+      fetchExportPreview(panel.id).then((res) => {
+        if (!cancelled) {
+          setExportPreview(res);
+          setExportPreviewLoading(false);
         }
       });
       return () => {
@@ -145,6 +156,7 @@ export default function App() {
     }
     setTraceDetail(null);
     setSession(null);
+    setExportPreview(null);
   }, [panel]);
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
@@ -274,7 +286,10 @@ export default function App() {
               <TraceDetail
                 trace={traceDetail}
                 loading={panelLoading}
+                exportPreview={exportPreview}
+                exportPreviewLoading={exportPreviewLoading}
                 onOpenSession={(sessionId) => setPanel({ kind: "session", id: sessionId })}
+                onSelectTrace={(id) => setPanel({ kind: "trace", id })}
                 onClose={() => setPanel({ kind: "none" })}
               />
             )}
