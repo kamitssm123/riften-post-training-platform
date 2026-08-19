@@ -62,6 +62,7 @@ export function StatsOverview({ stats, resultCount }: Props) {
     );
   }
 
+  const healthyCount = stats.total - stats.error_count - stats.truncated_count;
   const okRate = ((1 - stats.error_rate - stats.truncated_rate) * 100).toFixed(1);
 
   return (
@@ -77,7 +78,7 @@ export function StatsOverview({ stats, resultCount }: Props) {
           icon={<CheckCircle2 size={15} />}
           label="Healthy"
           value={`${okRate}%`}
-          sub="no error or truncation"
+          sub={`${healthyCount} of ${stats.total} traces`}
           accent="var(--success)"
         />
         <MetricTile
