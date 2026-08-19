@@ -1,6 +1,6 @@
 import { ChevronRight, GitBranch, MessageSquare } from "lucide-react";
 import type { SessionResponse } from "../types/trace";
-import { StatBadge } from "./StatBadge";
+import { FeedbackBadge, StatBadge } from "./StatBadge";
 import { LoadingSpinner } from "./ui/LoadingSpinner";
 import { PanelHeader } from "./ui/PanelHeader";
 
@@ -92,18 +92,7 @@ export function SessionThread({ session, loading, onSelectTrace, onClose }: Prop
                   {t.is_retrial && <StatBadge label="retrial" tone="dim" />}
                   {errored && <StatBadge label="error" tone="error" />}
                   {truncated && <StatBadge label="truncated" tone="warning" />}
-                  {t.feedback && (
-                    <StatBadge
-                      label={t.feedback}
-                      tone={
-                        t.feedback === "weak"
-                          ? "error"
-                          : t.feedback === "strong"
-                            ? "success"
-                            : "info"
-                      }
-                    />
-                  )}
+                  <FeedbackBadge feedback={t.feedback} />
                 </span>
                 <span className="flex items-center gap-1 font-mono text-[var(--text-faint)] group-hover:text-[var(--text)]">
                   {t.trace_id.slice(0, 8)}

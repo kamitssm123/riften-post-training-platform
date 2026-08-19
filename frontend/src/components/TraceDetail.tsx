@@ -1,7 +1,7 @@
 import { ArrowRight, Bot, Copy, FileText, User, Wrench } from "lucide-react";
 import { useState } from "react";
 import type { TraceDetail as TraceDetailT } from "../types/trace";
-import { StatBadge } from "./StatBadge";
+import { FeedbackBadge, StatBadge } from "./StatBadge";
 import { Card, CardContent } from "./ui/Card";
 import { LoadingSpinner } from "./ui/LoadingSpinner";
 import { PanelHeader } from "./ui/PanelHeader";
@@ -122,18 +122,7 @@ export function TraceDetail({ trace, loading, onOpenSession, onClose }: Props) {
         <div className="mt-2 flex flex-wrap items-center gap-1.5">
           {errored && <StatBadge label="Error" tone="error" />}
           {truncated && <StatBadge label="Truncated" tone="warning" />}
-          {trace.feedback && (
-            <StatBadge
-              label={trace.feedback}
-              tone={
-                trace.feedback === "weak"
-                  ? "error"
-                  : trace.feedback === "strong"
-                    ? "success"
-                    : "info"
-              }
-            />
-          )}
+          <FeedbackBadge feedback={trace.feedback} />
           {trace.is_retrial && <StatBadge label="Retrial" tone="dim" />}
           {trace.continuation_status && (
             <StatBadge

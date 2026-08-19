@@ -20,6 +20,29 @@ export function StatBadge({ label, tone = "neutral" }: { label: string; tone?: T
   );
 }
 
+// Feedback is a human quality rating, independent of whether the call itself
+// succeeded -- labelled distinctly from the Error/Truncated/OK call-outcome
+// badge so a healthy call rated "ok" doesn't render as two identical "OK"
+// badges side by side.
+const FEEDBACK_LABELS: Record<string, string> = {
+  weak: "Weak",
+  ok: "Fair",
+  strong: "Great",
+};
+
+const FEEDBACK_TONES: Record<string, Tone> = {
+  weak: "error",
+  ok: "info",
+  strong: "success",
+};
+
+export function FeedbackBadge({ feedback }: { feedback: string | null }) {
+  if (!feedback) return null;
+  return (
+    <StatBadge label={FEEDBACK_LABELS[feedback] ?? feedback} tone={FEEDBACK_TONES[feedback] ?? "neutral"} />
+  );
+}
+
 /** Compact status read for a trace row: usable / error / truncated, at a glance. */
 export function TraceStatusBadges({
   errored,
@@ -35,12 +58,7 @@ export function TraceStatusBadges({
       {errored && <StatBadge label="Error" tone="error" />}
       {truncated && <StatBadge label="Truncated" tone="warning" />}
       {!errored && !truncated && <StatBadge label="OK" tone="success" />}
-      {feedback && (
-        <StatBadge
-          label={feedback}
-          tone={feedback === "weak" ? "error" : feedback === "strong" ? "success" : "info"}
-        />
-      )}
+      <FeedbackBadge feedback={feedback} />
     </div>
   );
 }
