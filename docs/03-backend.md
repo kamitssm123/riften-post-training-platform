@@ -2,9 +2,13 @@
 
 All paths relative to `/backend`. Files are covered in the order you'd read
 them to understand the system: schema → ingest → generator → API → exports →
-tests.
+tests. Modules live in subpackages by role (`core/`, `db/`, `generation/`,
+`api/`, `exports/`, `quality/`, `tests/`), each with an `__init__.py`, and
+are imported by full dotted path (e.g. `from core.schema import Trace`);
+run any of them as a script with `python -m <package>.<module>` from
+`/backend`, not `python <module>.py`.
 
-## `schema.py`
+## `core/schema.py`
 
 **Purpose**: single source of truth for the trace shape. Every other backend
 module imports from here instead of redefining fields.
@@ -32,19 +36,19 @@ Contents:
   - `to_row(self)` (lines 77-84) — flattens a `Trace` instance to a dict
     with `messages`/`response`/`tool_calls` JSON-encoded as strings and
     `is_retrial` cast to `int`. **Not actually called anywhere in the
-    codebase** — `ingest.py` builds its insert tuples manually
+    codebase** — `db/ingest.py` builds its insert tuples manually
     (ingest.py:58-79) rather than constructing `Trace` objects and calling
     `to_row()`. This method is dead code as of the current implementation.
   - `Trace.from_row(row)` (lines 86-94, `@staticmethod`) — the inverse:
     takes a `dict` (from `sqlite3.Row`), JSON-decodes the three TEXT
     columns back into nested structures, and casts `is_retrial` to `bool`.
-    This one **is** used, by `main.py` (`get_trace`, `get_session`) and by
-    `export_sft.py`'s `fetch_all_traces()`.
+    This one **is** used, by `api/main.py` (`get_trace`, `get_session`) and
+    by `exports/export_sft.py`'s `fetch_all_traces()`.
 - `CREATE_TABLE_SQL` (lines 97-121) — the DDL for the `traces` table and its
   four indexes. See `docs/05-database.md` for the full column-by-column
   breakdown.
 
-## `ingest.py`
+## `db/ingest.py`
 
 **Purpose**: load `/data/traces.json` into the SQLite `traces` table,
 destructively and idempotently.
@@ -56,21 +60,21 @@ destructively and idempotently.
 - `get_connection()` (lines 40-44) — `DATA_DIR.mkdir(parents=True,
   exist_ok=True)` then `sqlite3.connect(DB_PATH)` with `row_factory =
   sqlite3.Row` so query results are dict-like. Called by `ingest.py` itself
-  and imported directly by `export_sft.py` (`from ingest import
-  get_connection`) — the exports do not go through `main.py` at all.
+  and imported directly by `exports/export_sft.py` (`from db.ingest import
+  get_connection`) — the exports do not go through `api/main.py` at all.
 - `load_corpus(traces_path=TRACES_JSON_PATH)` (lines 47-89) — the function
   the task spec calls out by name. Steps: parse the JSON file: run
   `CREATE_TABLE_SQL` (idempotent `CREATE TABLE IF NOT EXISTS`); `DELETE FROM
   traces` (the actual wipe); build one tuple per trace in the fixed
   `COLUMNS` order (lines 18-37); `executemany` insert; `commit()`. Returns
-  the row count. Every test fixture in the four `test_*.py` files calls this
-  function directly (via a monkeypatched `DB_PATH`) rather than going
-  through a running server.
+  the row count. Every test fixture under `tests/` calls this function
+  directly (via a monkeypatched `DB_PATH`) rather than going through a
+  running server.
 - `main()` (lines 92-98) — CLI entry point. Checks `TRACES_JSON_PATH.exists()`
   and raises `SystemExit` with a message pointing at `generate_corpus.py` if
   not; otherwise calls `load_corpus()` and prints the row count.
 
-## `generate_corpus.py`
+## `generation/generate_corpus.py`
 
 **Purpose**: produce the synthetic trace corpus as a JSON file. Full
 parameter and messiness breakdown lives in `docs/06-dataset.md` — this
@@ -148,14 +152,14 @@ section covers structure only.
 - `main()` (lines 340-345) — calls `generate()`, writes indented JSON to
   `OUT_PATH`, prints a summary line with total trace and session counts.
 
-## `main.py`
+## `api/main.py`
 
 **Purpose**: the FastAPI app. Read-only trace/session/stats endpoints plus
 thin wrappers around the three export functions.
 
 | Reads | Writes |
 |---|---|
-| `/data/traces.db` (via `get_connection()`, main.py:35-38 — a module-local copy of the same pattern as `ingest.py`, not imported from it) | `/data/exports/*` indirectly, via the imported `build_sft_export`/`build_preference_export`/`build_exclusion_report` |
+| `/data/traces.db` (via `get_connection()`, main.py:35-38 — a module-local copy of the same pattern as `db/ingest.py`, not imported from it) | `/data/exports/*` indirectly, via the imported `build_sft_export`/`build_preference_export`/`build_exclusion_report` |
 
 CORS is wide open: `allow_origins=["*"]`, `allow_methods=["*"]`,
 `allow_headers=["*"]` (lines 27-32) — fine for a local synthetic-data demo,
@@ -249,7 +253,7 @@ Each is a one-line wrapper: no request body, no params, calls the
 corresponding `build_*` function from the export modules and returns its
 dict as-is. See `docs/07-exports.md` for the full response shape of each.
 
-## `exclusion_rules.py`
+## `exports/exclusion_rules.py`
 
 **Purpose**: single source of truth for the SFT and preference-pair
 exclusion rules, extracted out of `export_sft.py`/`export_preference.py` so
@@ -287,34 +291,34 @@ implementation. Pure functions, no I/O.
   for a weak/rejected-continuation trace that found no partner; absent
   entirely for a trace never considered on either side of a pair).
 
-## `export_sft.py`
+## `exports/export_sft.py`
 
 Covered in full step-by-step detail with worked examples in
 `docs/07-exports.md`. Summary:
 
 | Reads | Writes |
 |---|---|
-| `/data/traces.db` (via `ingest.get_connection`) | `/data/exports/sft.jsonl` |
+| `/data/traces.db` (via `db.ingest.get_connection`) | `/data/exports/sft.jsonl` |
 
 - `fetch_all_traces()` — `SELECT * FROM traces`, no filter, inflated via
   `Trace.from_row`. Also imported by `export_preference.py` and
-  `main.py` (for the export-preview route).
+  `api/main.py` (for the export-preview route).
 - `select_session_representative` / `row_level_exclusion_reason` are
   re-exported from `exclusion_rules.py` (see above) for any code that
   imported them from `export_sft` before the refactor.
 - `build_sft_export()` — calls `exclusion_rules.compute_sft_plan(traces)`,
   writes `kept_rows` to `sft.jsonl`, returns the summary dict consumed by
-  `main.py` and `exclusion_report.py`. The write-to-file step is the only
-  thing left in this module; the exclusion logic itself now lives in
+  `api/main.py` and `exclusion_report.py`. The write-to-file step is the
+  only thing left in this module; the exclusion logic itself now lives in
   `exclusion_rules.py`.
 - `main()` — CLI entry point, prints a one-line summary plus one line per
   exclusion reason.
 
-## `export_preference.py`
+## `exports/export_preference.py`
 
 | Reads | Writes |
 |---|---|
-| `/data/traces.db` (via `export_sft.fetch_all_traces`) | `/data/exports/preference.jsonl` |
+| `/data/traces.db` (via `exports.export_sft.fetch_all_traces`) | `/data/exports/preference.jsonl` |
 
 - `make_pair` — alias for `exclusion_rules.make_preference_pair`.
 - `build_preference_export()` — calls
@@ -325,7 +329,7 @@ Covered in full step-by-step detail with worked examples in
   in `docs/07-exports.md`.
 - `main()` — CLI entry point.
 
-## `export_preview.py`
+## `exports/export_preview.py`
 
 **Purpose**: backs `GET /traces/{trace_id}/export-preview`. Runs
 `exclusion_rules.compute_sft_plan()` and `compute_preference_plan()` over
@@ -351,7 +355,7 @@ endpoint doesn't change either `.jsonl` output.
   `{"sft": {...}, "preference": {...}}`, the full response body for the
   route. See `docs/07-exports.md` for the JSON shape.
 
-## `model_tradeoff.py`
+## `api/model_tradeoff.py`
 
 **Purpose**: backs `GET /stats/model-tradeoff` — average cost vs. average
 quality per model, the one analysis that validates Riften's cost-aware
@@ -384,17 +388,20 @@ No params. Calls `model_tradeoff.compute_model_tradeoff(conn)` and returns
 `{"items": ModelTradeoff[]}`, one entry per distinct `model` in the traces
 table. See `docs/07-exports.md` for the field-by-field JSON shape.
 
-### `GET /traces/{trace_id}/export-preview` — `get_trace_export_preview`
+### `GET /traces/{trace_id}/export-preview` — `get_export_preview`
 
-404s with `{"detail": "trace not found"}` if `trace_id` doesn't exist
-(checked with a lightweight `SELECT 1` before doing the full-corpus scan).
-Otherwise calls `export_sft.fetch_all_traces()` once and passes the result
-to `export_preview.build_export_preview(trace_id, all_traces)`. Read-only —
+Calls `export_sft.fetch_all_traces()` once, 404s with
+`{"detail": "trace not found"}` if no row in that result matches
+`trace_id`, otherwise passes the same in-memory list to
+`export_preview.build_export_preview(trace_id, all_traces)`. The existence
+check is a linear scan over the already-fetched list, not a separate SQL
+query — the full-corpus fetch happens either way, so there's no cheaper
+short-circuit being skipped. Read-only —
 does not write `sft.jsonl`/`preference.jsonl`/`exclusion_report.md`, unlike
 `POST /export/sft`/`POST /export/preference`/`GET /export/exclusions`,
 which all rewrite those files as a side effect.
 
-## `exclusion_report.py`
+## `exports/exclusion_report.py`
 
 | Reads | Writes |
 |---|---|
@@ -417,14 +424,19 @@ which all rewrite those files as a side effect.
 
 ## Tests
 
-| File | Lines | What it covers |
-|---|---|---|
-| `test_main.py` | 202 | 16 tests against a 3-row fixture (`FIXTURE_TRACES`, lines 15-76) loaded through a `TestClient(main.app)` fixture (lines 79-90) that monkeypatches both `ingest.DB_PATH` and `main.DB_PATH` to a `tmp_path` file — every `/traces`, `/traces/{id}`, `/sessions/{id}`, `/stats` filter combination named in the route docstrings gets at least one test. |
-| `test_export_sft.py` | 113 | 6 tests: turn-index collapsing, the retrial tiebreak at equal turn_index, each of the 4 row-level exclusion reasons individually, and a metadata-leak check confirming `messages` never contains a `feedback`/other metadata key. |
-| `test_export_preference.py` | 140 | 6 tests: retrial pairing, weak-rating pairing when a same-turn candidate exists, weak-rating logged as `no_pairing_candidate` when none exists, continuation-rejected pairing, a same-session-different-turn case proving pairing does *not* cross turn boundaries, and an output-shape check on the written JSONL. |
-| `test_exclusion_report.py` | 95 | 3 tests: the sum-to-total invariant on a synthetic 3-trace fixture, presence of both `sft`/`preference` top-level keys, and that `render_markdown` doesn't raise and contains both section headers. |
-| `test_model_tradeoff.py` | new | 1 test: `compute_model_tradeoff` against a known 3-trace, 2-model fixture, asserting every aggregate (`avg_cost_usd`, `avg_latency_ms`, `avg_tokens_prompt`/`completion`, `avg_quality_score`, `feedback_coverage`, `error_rate`, `truncation_rate`) by hand-computed expected value, including the no-feedback-data case (`avg_quality_score is None`, `feedback_coverage == 0.0`) for the model with no feedback. |
-| `test_export_preview.py` | new | 4 tests against `export_preview.build_export_preview`: the `superseded_by_longer_session_trace` case names the specific superseding trace_id in `detail`; an included trace reports `included: True`; a retrial pair reports the correct `role`/`source`/`paired_with_trace_id` for the rejected side; a trace never considered on either side of a pair reports `eligible: False`. |
+All under `backend/tests/` (no `__init__.py` there — pytest's default
+rootless collection, run via `python -m pytest -q` from `/backend`, which
+also puts `/backend` on `sys.path` so `tests/*.py`'s `from api import
+main`-style imports resolve). 42 tests total across 6 files:
+
+| File | What it covers |
+|---|---|
+| `test_main.py` | 16 tests against a 3-row fixture (`FIXTURE_TRACES`) loaded through a `TestClient(main.app)` fixture that monkeypatches both `ingest.DB_PATH` and `main.DB_PATH` to a `tmp_path` file — every `/traces`, `/traces/{id}`, `/sessions/{id}`, `/stats` filter combination named in the route docstrings gets at least one test. |
+| `test_export_sft.py` | 10 tests: turn-index collapsing, the retrial tiebreak at equal turn_index, each of the row-level exclusion reasons individually, the longest-trace-excluded-drops-whole-session case, the single-trace-session row-exclusion case, a same-turn tie without a retrial/continuation link, cross-session duplicate-message dedup, and a metadata-leak check confirming `messages` never contains a `feedback`/other metadata key. |
+| `test_export_preference.py` | 7 tests: retrial pairing, a retrial loser also producing a weak-rating pair, weak-rating pairing when a same-turn candidate exists, weak-rating logged as `no_pairing_candidate` when none exists, continuation-rejected pairing, a same-session-different-turn case proving pairing does *not* cross turn boundaries, and an output-shape check on the written JSONL. |
+| `test_exclusion_report.py` | 3 tests: the sum-to-total invariant on a synthetic 3-trace fixture, presence of both `sft`/`preference` top-level keys, and that `render_markdown` doesn't raise and contains both section headers. |
+| `test_model_tradeoff.py` | 1 test: `compute_model_tradeoff` against a known 3-trace, 2-model fixture, asserting every aggregate (`avg_cost_usd`, `avg_latency_ms`, `avg_tokens_prompt`/`completion`, `avg_quality_score`, `feedback_coverage`, `error_rate`, `truncation_rate`) by hand-computed expected value, including the no-feedback-data case (`avg_quality_score is None`, `feedback_coverage == 0.0`) for the model with no feedback. |
+| `test_export_preview.py` | 5 tests against `export_preview.build_export_preview`: the `superseded_by_longer_session_trace` case names the specific superseding trace_id in `detail`; a `non_2xx_response` case names the specific status code in `detail`; an included trace reports `included: True`; a retrial pair reports the correct `role`/`source`/`paired_with_trace_id` for the rejected side; a trace never considered on either side of a pair reports `eligible: False`. |
 
 All test files define their own local `trace(**overrides)` fixture builder
 (or `FIXTURE_TRACES` list) rather than sharing one — there's no

@@ -12,7 +12,7 @@ Loads /data/traces.json and scores it 0-100 against three categories:
   - Diversity (20 pts): unique question count, unique response count, and
     the rate of sessions with an unexplained verbatim-repeated question.
 
-Run directly: `python corpus_quality_check.py [path/to/traces.json]`.
+Run directly: `python -m quality.corpus_quality_check [path/to/traces.json]`.
 """
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ import sys
 from collections import Counter, defaultdict
 from pathlib import Path
 
-DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
 DEFAULT_TRACES_PATH = DATA_DIR / "traces.json"
 
 STOPWORDS = {

@@ -25,12 +25,12 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from content_bank import AGENTIC_TOPICS, NON_AGENTIC_TOPICS, Exchange, Topic
-from schema import MODEL_LATENCY_MS, MODEL_PRICING_PER_1K, Model
+from core.schema import MODEL_LATENCY_MS, MODEL_PRICING_PER_1K, Model
+from generation.content_bank import AGENTIC_TOPICS, NON_AGENTIC_TOPICS, Exchange, Topic
 
 random.seed(42)
 
-DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
 OUT_PATH = DATA_DIR / "traces.json"
 
 MODELS: list[Model] = [

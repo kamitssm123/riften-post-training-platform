@@ -1,7 +1,7 @@
 """Tests for the live per-trace export-eligibility preview."""
 from __future__ import annotations
 
-import export_preview
+from exports import export_preview
 
 
 def trace(**overrides):

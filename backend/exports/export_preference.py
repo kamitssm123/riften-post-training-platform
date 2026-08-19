@@ -11,10 +11,10 @@ import json
 from pathlib import Path
 from typing import Any
 
-from exclusion_rules import compute_preference_plan, make_preference_pair
-from export_sft import fetch_all_traces
+from exports.exclusion_rules import compute_preference_plan, make_preference_pair
+from exports.export_sft import fetch_all_traces
 
-DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
 EXPORTS_DIR = DATA_DIR / "exports"
 OUT_PATH = EXPORTS_DIR / "preference.jsonl"
 

@@ -10,16 +10,16 @@ import json
 from pathlib import Path
 from typing import Any
 
-from exclusion_rules import (
+from core.schema import Trace
+from db.ingest import get_connection
+from exports.exclusion_rules import (
     SFT_ROW_EXCLUSION_ORDER as ROW_EXCLUSION_ORDER,
     compute_sft_plan,
     row_level_exclusion_reason,
     select_session_representative,
 )
-from ingest import get_connection
-from schema import Trace
 
-DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
 EXPORTS_DIR = DATA_DIR / "exports"
 OUT_PATH = EXPORTS_DIR / "sft.jsonl"
 

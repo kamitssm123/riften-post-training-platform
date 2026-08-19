@@ -33,18 +33,26 @@ main.tsx
               │     └── StatBadge ×N
               └── ExclusionPanel                     (components/ExclusionPanel.tsx)
                     └── ReasonTable ×2                 (private, module-local)
-                          (button per sample trace_id, calls back up to App.tsx's setPanel)
+                          (button per sample trace_id, calls back up to App.tsx's openTrace/navigate)
 ```
 
-There is no router and no nested route components — the "page" is always
-`App.tsx`; navigation between trace detail / session thread / exclusion
-report is modeled as a single `panel` state value (a discriminated union,
-`App.tsx`) that swaps which component renders in the right-hand column, and
-independently a `mainView: "traces" | "tradeoff"` state value swaps which
-content fills the main (non-panel) area. The two are orthogonal — switching
+There is no routing library and no nested route components — the "page" is
+always `App.tsx` — but navigation does drive real, shareable URLs via a
+hand-rolled router: `hooks/useRouter.ts` tracks
+`window.location.pathname` in state and exposes `navigate(path)`
+(`window.history.pushState` + a `popstate` listener for back/forward), and
+`routes.ts` maps between that pathname and a typed `Route` (`parsePath`)
+and back (`pathForRoute`). `App.tsx` derives `panel` (a discriminated
+union swapping which component renders in the right-hand column) and
+`mainView: "traces" | "tradeoff"` (swapping which content fills the main,
+non-panel area) from the current `Route` via `useMemo`, rather than storing
+either as its own `useState`. The two are orthogonal — switching
 `mainView` does not close whatever `panel` is open, so a trace detail panel
 opened from the Traces tab stays open while browsing the Model tradeoff
-tab.
+tab (routes like `/traces/{id}` only ever encode the panel, not the main
+view). Route shapes: `traces` (`/`), `tradeoff` (`/model-tradeoff`),
+`exclusions` (`/exclusions`), `trace` (`/traces/{id}`), `session`
+(`/sessions/{id}`).
 
 ## `main.tsx`
 
@@ -54,28 +62,32 @@ state.
 
 ## `App.tsx`
 
-The only stateful component in the app. Owns:
+The only stateful component in the app. `pathname`/`navigate` come from
+`useRouter()`; `route` (`useMemo` over `pathname`), and in turn `panel` and
+`mainView`, are *derived* from that router state rather than stored as
+their own `useState` — see the routing paragraph above. Everything else is
+plain `useState`:
 
 | State | Type | Set by |
 |---|---|---|
 | `filters` | `TraceFilters` | `FilterRail`'s `onChange` |
-| `page` | `number` | pagination buttons; reset to `1` whenever `filters` changes (line 40-42) |
+| `page` | `number` | pagination buttons; reset to `1` whenever `filters` changes |
 | `traces` | `TraceSummary[]` | resolved `fetchTraces()` response |
 | `total` | `number` | resolved `fetchTraces()` response, drives `FilterRail`'s live result count and the pagination label |
 | `stats` | `Stats \| null` | resolved `fetchStats()` response |
-| `tableLoading` | `boolean` | true while a `fetchTraces` call is in flight — drives an `opacity-50` class on the table wrapper (line 151), not a spinner |
-| `panel` | `Panel` (discriminated union) | click handlers passed down to `TraceTable`, `TraceDetail`, `SessionThread`, `ExclusionPanel`, and the header's "Exclusion report" button |
+| `tableLoading` | `boolean` | true while a `fetchTraces` call is in flight — drives an `opacity-70` class on the table wrapper, not a spinner |
+| *`panel`* | `Panel` (discriminated union) | derived from `route` via `useMemo`; the header nav buttons and row/panel click handlers call `navigate()` (via `openTrace`/`openSession`/`goExclusions`/`closePanel`), which updates the URL and re-derives `panel` |
 | `traceDetail` | `TraceDetailT \| null` | resolved `fetchTrace()` response, only relevant when `panel.kind === "trace"` |
 | `session` | `SessionResponse \| null` | resolved `fetchSession()` response, only relevant when `panel.kind === "session"` |
 | `exclusionReport` | `ExclusionReport \| null` | resolved `fetchExclusionReport()` response, only relevant when `panel.kind === "exclusions"` |
 | `panelLoading` | `boolean` | true while any of the three panel fetches above is in flight |
-| `mainView` | `"traces" \| "tradeoff"` | the header's "Traces"/"Model tradeoff" nav buttons |
+| *`mainView`* | `"traces" \| "tradeoff"` | derived from `route` (`route.name === "tradeoff" ? "tradeoff" : "traces"`); the header's "Traces"/"Model tradeoff" nav buttons call `navigate()`, not a setter |
 | `tradeoff` | `ModelTradeoff[] \| null` | resolved `fetchModelTradeoff()` response, only fetched while `mainView === "tradeoff"` |
 | `tradeoffLoading` | `boolean` | true while the tradeoff fetch is in flight |
 | `exportPreview` | `ExportPreview \| null` | resolved `fetchExportPreview(traceId)` response, fetched alongside `traceDetail` whenever `panel.kind === "trace"` |
 | `exportPreviewLoading` | `boolean` | true while the export-preview fetch is in flight |
 
-Six `useEffect` hooks:
+Five `useEffect` hooks:
 1. `[filters]` → reset `page` to 1.
 2. `[filters, page]` → `fetchTraces`, sets `traces`/`total`/`tableLoading`.
 3. `[filters]` → `fetchStats`, sets `stats`. Runs in parallel
@@ -105,9 +117,9 @@ case).
 
 Render: a `flex h-screen flex-col` root — header, then a `flex min-h-0
 flex-1` row containing `FilterRail`, the `<main>` table+pagination column,
-and (conditionally, `panel.kind !== "none"`) a fixed `w-[520px]` right
+and (conditionally, `panel.kind !== "none"`) a fixed `w-[540px]` right
 column that renders exactly one of `TraceDetail`/`SessionThread`/`ExclusionPanel`
-based on `panel.kind` (lines 181-208).
+based on `panel.kind`.
 
 ## `api/client.ts`
 
@@ -233,8 +245,9 @@ e.g. naming the specific superseding trace_id for
 eligible and `paired_with_trace_id` is set, a small button reading `paired
 with #{shortId}` sits next to the preference badge and calls
 `onSelectTrace(paired_with_trace_id)` — in `App.tsx` this is wired to the
-same `(id) => setPanel({kind: "trace", id})` handler used everywhere else,
-so clicking it swaps the detail panel straight to the paired trace (the
+same `openTrace` handler used everywhere else (navigates to
+`/traces/{id}`, which re-derives `panel` to `{kind: "trace", id}`), so
+clicking it swaps the detail panel straight to the paired trace (the
 chosen or rejected counterpart of the same pair).
 
 ## `components/SessionThread.tsx`
@@ -258,9 +271,9 @@ void, onInspectTrace: (id: string) => void}`. No local state.
 `ReasonTable({excluded, onInspectTrace})` (lines 10-44) is a private helper
 rendering one bordered block per exclusion reason, with the count in accent
 color and up to 5 sample `trace_id`s as small buttons — clicking one calls
-`onInspectTrace(id)`, which in `App.tsx` is wired to `(id) => setPanel({kind:
-"trace", id})` (App.tsx:204), so clicking a sample trace_id swaps the right
-panel from the exclusion report straight into that trace's detail view.
+`onInspectTrace(id)`, which in `App.tsx` is wired to `openTrace` (navigates
+to `/traces/{id}`), so clicking a sample trace_id swaps the right panel
+from the exclusion report straight into that trace's detail view.
 The panel itself has two `<section>`s (SFT export, Preference pair export),
 each showing summary counts above its `ReasonTable`.
 
@@ -377,8 +390,11 @@ Plain React local state (`useState`) plus `useEffect` for data fetching,
 entirely inside `App.tsx`. No Context, no Redux/Zustand/Jotai, no
 React Query/SWR — every fetch is a hand-written `useEffect` with a
 `cancelled` boolean closure for race-safety and no caching, retries, or
-shared query keys. Filter state, the currently selected trace/session/panel,
-and every fetched response live as sibling `useState` slots in the single
-top-level component; child components are entirely presentational and
-receive both data and callbacks as props, with `FilterRail` in particular
-being a fully controlled component that owns no state of its own.
+shared query keys. Filter state and every fetched response live as sibling
+`useState` slots in the single top-level component; the currently selected
+trace/session/panel and the active main view are instead derived from the
+URL (`useRouter.ts` + `routes.ts`), so they survive a page refresh and are
+directly shareable/bookmarkable. Child components are entirely
+presentational and receive both data and callbacks as props, with
+`FilterRail` in particular being a fully controlled component that owns no
+state of its own.

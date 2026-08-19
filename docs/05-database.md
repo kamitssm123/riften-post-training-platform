@@ -1,7 +1,8 @@
 # Database
 
 Single SQLite file at `/data/traces.db`, one table (`traces`), defined in
-`backend/schema.py:97-121` and created by `ingest.py`'s `load_corpus()`.
+`backend/core/schema.py:97-121` and created by `db/ingest.py`'s
+`load_corpus()`.
 There is no migration system — the DDL is `CREATE TABLE IF NOT EXISTS`,
 applied fresh every time `load_corpus()` runs.
 

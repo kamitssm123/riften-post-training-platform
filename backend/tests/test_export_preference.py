@@ -5,8 +5,8 @@ import json
 
 import pytest
 
-import export_preference
-import ingest
+from db import ingest
+from exports import export_preference
 
 
 def trace(**overrides):

@@ -5,8 +5,8 @@ import json
 
 import pytest
 
-import ingest
-import model_tradeoff
+from api import model_tradeoff
+from db import ingest
 
 
 def trace(**overrides):

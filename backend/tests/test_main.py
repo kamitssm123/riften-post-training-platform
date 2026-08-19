@@ -8,9 +8,9 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-import ingest
-import main
-from schema import CREATE_TABLE_SQL
+from api import main
+from core.schema import CREATE_TABLE_SQL
+from db import ingest
 
 FIXTURE_TRACES = [
     {

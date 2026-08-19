@@ -21,7 +21,14 @@ sessions).
 ## Directory layout
 
 ```
-/backend    FastAPI app, schema, generator, ingest, exports, tests
+/backend
+  api/         FastAPI app (main.py) + the model cost/quality tradeoff query
+  core/        shared Trace schema (schema.py)
+  db/          SQLite connection + corpus loading (ingest.py)
+  generation/  synthetic corpus generator + its content bank
+  exports/     SFT/preference export + exclusion-rule/report logic
+  quality/     standalone corpus- and export-quality scorers
+  tests/       pytest suite (mirrors the modules above)
 /frontend   React + TS + Vite + Tailwind inspector UI
 /data       generated traces (sqlite db) + exports (gitignored, kept via .gitkeep)
 /docs       supporting docs
@@ -30,11 +37,12 @@ sessions).
 ## Architecture
 
 ```
-generate_corpus.py --> /data/traces.json --> ingest.py --> /data/traces.db (SQLite)
+generation/generate_corpus.py --> /data/traces.json --> db/ingest.py --> /data/traces.db (SQLite)
                                                                   |
                                                                   v
-                                                        main.py (FastAPI)
+                                                        api/main.py (FastAPI)
                                         /traces  /traces/{id}  /sessions/{id}  /stats
+                                        /traces/{id}/export-preview  /stats/model-tradeoff
                                         POST /export/sft  POST /export/preference
                                         GET  /export/exclusions
                                                                   |
@@ -48,8 +56,8 @@ generate_corpus.py --> /data/traces.json --> ingest.py --> /data/traces.db (SQLi
 
 ## Trace schema
 
-Defined once in `backend/schema.py` and consumed by the generator, the API,
-and both exports:
+Defined once in `backend/core/schema.py` and consumed by the generator, the
+API, and both exports:
 
 | field | type | notes |
 |---|---|---|
@@ -79,14 +87,14 @@ python3 -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
 
 # 2. Generate the synthetic corpus and load it into SQLite
-python generate_corpus.py     # -> /data/traces.json
-python ingest.py              # -> /data/traces.db
+python -m generation.generate_corpus   # -> /data/traces.json
+python -m db.ingest                    # -> /data/traces.db
 
 # 3. Run the tests
 python -m pytest -q
 
 # 4. Run the API
-uvicorn main:app --reload     # http://127.0.0.1:8000
+uvicorn api.main:app --reload    # http://127.0.0.1:8000
 
 # 5. Run the frontend (separate terminal)
 cd ../frontend
@@ -95,13 +103,17 @@ npm run dev                   # http://127.0.0.1:5173, proxies /api -> :8000
 
 # 6. Run the exports (either via script or the running API)
 cd ../backend
-python export_sft.py          # -> /data/exports/sft.jsonl
-python export_preference.py   # -> /data/exports/preference.jsonl
-python exclusion_report.py    # -> /data/exports/exclusion_report.md
+python -m exports.export_sft          # -> /data/exports/sft.jsonl
+python -m exports.export_preference   # -> /data/exports/preference.jsonl
+python -m exports.exclusion_report    # -> /data/exports/exclusion_report.md
 # or, with the API running:
 #   curl -X POST localhost:8000/export/sft
 #   curl -X POST localhost:8000/export/preference
 #   curl localhost:8000/export/exclusions
+
+# 7. Run the corpus/export quality scorers (optional, standalone)
+python -m quality.corpus_quality_check
+python -m quality.export_quality_check
 ```
 
 The Inspector UI's header has an "Exclusion report" link that renders the
@@ -117,8 +129,9 @@ the trace detail view for auditing.
   *shares* that highest `turn_index` — a retrial pair (original + retry) or
   a continuation accept/reject pair both branch off the same prior context,
   so their `messages` arrays are identical and "longest messages array"
-  can't break the tie. We resolve it in `export_sft.select_session_representative`
-  by preferring the branch that isn't already a "loser" by construction:
+  can't break the tie. We resolve it in
+  `exports.export_sft.select_session_representative` by preferring the
+  branch that isn't already a "loser" by construction:
   not the discarded side of a retrial, not a rejected continuation. If that
   narrows to exactly one candidate, it's kept; the rest of the session's
   traces (including the other branch) are excluded as
@@ -153,9 +166,9 @@ the trace detail view for auditing.
 
 ## Verified end-to-end
 
-On a fresh clone: `generate_corpus.py` → `ingest.py` → `pytest` → both
-export scripts → `exclusion_report.py` all run without errors; `sft.jsonl`
-and `preference.jsonl` are non-empty; and for the SFT export,
+On a fresh clone: `generation.generate_corpus` → `db.ingest` → `pytest` →
+both export scripts → `exports.exclusion_report` all run without errors;
+`sft.jsonl` and `preference.jsonl` are non-empty; and for the SFT export,
 `sum(excluded counts) + kept_count == total_traces_considered` (asserted in
 `exclusion_report.build_exclusion_report` and covered by
-`test_exclusion_report.py`).
+`tests/test_exclusion_report.py`).

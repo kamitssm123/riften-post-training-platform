@@ -5,8 +5,8 @@ import json
 
 import pytest
 
-import export_sft
-import ingest
+from db import ingest
+from exports import export_sft
 
 
 def trace(**overrides):

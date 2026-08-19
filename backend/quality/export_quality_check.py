@@ -5,7 +5,7 @@ bookkeeping. Loads `/data/traces.json`, `/data/exports/sft.jsonl`, and
 the raw corpus (not by trusting `compute_sft_plan`/`compute_preference_plan`)
 so a bug shared between the exporter and the scorer can't hide itself.
 
-Run directly: `python export_quality_check.py`.
+Run directly: `python -m quality.export_quality_check`.
 """
 from __future__ import annotations
 
@@ -15,9 +15,9 @@ from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
 
-from corpus_quality_check import STOPWORDS, TOKEN_RE, tokenize  # noqa: F401 (STOPWORDS/TOKEN_RE re-exported for callers)
+from quality.corpus_quality_check import STOPWORDS, TOKEN_RE, tokenize  # noqa: F401 (STOPWORDS/TOKEN_RE re-exported for callers)
 
-DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
 EXPORTS_DIR = DATA_DIR / "exports"
 TRACES_PATH = DATA_DIR / "traces.json"
 SFT_PATH = EXPORTS_DIR / "sft.jsonl"

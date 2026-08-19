@@ -9,9 +9,9 @@ import json
 import sqlite3
 from pathlib import Path
 
-from schema import CREATE_TABLE_SQL
+from core.schema import CREATE_TABLE_SQL
 
-DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
 DB_PATH = DATA_DIR / "traces.db"
 TRACES_JSON_PATH = DATA_DIR / "traces.json"
 

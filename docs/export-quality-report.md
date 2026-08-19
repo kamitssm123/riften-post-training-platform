@@ -1,8 +1,8 @@
 # Export quality: before/after
 
-Fixed two exporter-logic bugs in `backend/exclusion_rules.py` (the shared
+Fixed two exporter-logic bugs in `backend/exports/exclusion_rules.py` (the shared
 module behind `export_sft.py`, `export_preference.py`, and the
-export-preview route). Scored with the new `backend/export_quality_check.py`,
+export-preview route). Scored with the new `backend/quality/export_quality_check.py`,
 which re-derives ground truth directly from `data/traces.json` rather than
 trusting the exporter's own bookkeeping.
 
@@ -14,7 +14,7 @@ trusting the exporter's own bookkeeping.
 | Preference score | 68/100 | 100/100 | 90–95 |
 | Weak-rating pairs produced | 0 | 8 | 8 |
 
-Both bugs were fixed in `backend/exclusion_rules.py` only — `generate_corpus.py`,
+Both bugs were fixed in `backend/exports/exclusion_rules.py` only — `generate_corpus.py`,
 `content_bank.py`, `ingest.py`, backend routes, and the frontend were untouched.
 
 ## Bug 1 — SFT session collapsing
@@ -47,7 +47,7 @@ concrete, reproducible defect was:
   `len(messages)` per spec (unreachable in the current corpus, but now
   matches the documented rule and is covered by a new test).
 
-Verification (`backend/export_quality_check.py`, independent of
+Verification (`backend/quality/export_quality_check.py`, independent of
 `exclusion_rules.py`): 0 sessions contribute more than one row to
 `sft.jsonl`, 0 duplicate `messages` arrays — session collapsing correctness
 scores the full 30/30 (pass/fail).

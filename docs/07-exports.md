@@ -3,7 +3,7 @@
 **Shared exclusion-rule module**: the session-collapse algorithm
 (`select_session_representative`), the SFT row-level exclusion checks
 (`row_level_exclusion_reason`), and the preference three-pass pairing
-algorithm now live in `backend/exclusion_rules.py` as
+algorithm now live in `backend/exports/exclusion_rules.py` as
 `compute_sft_plan(traces)` and `compute_preference_plan(traces)`, extracted
 out of `export_sft.py`/`export_preference.py` in a pure refactor (verified
 byte-identical `sft.jsonl`/`preference.jsonl`/`exclusion_report.md` output
@@ -245,7 +245,7 @@ is what makes "counts sum correctly" a runtime-checked invariant rather
 than a claim.
 
 Current corpus, reproduced from the live `/data/exports/exclusion_report.md`
-(regenerable via `python exclusion_report.py`):
+(regenerable via `python -m exports.exclusion_report`):
 
 **SFT export**: 381 traces considered across 135 sessions; 108 kept.
 
@@ -370,7 +370,7 @@ Not an export and doesn't touch exclusion logic at all — listed here
 because, like the preview above, it's a read view over the same trace data
 that motivates the exports (validating that cheaper models are actually
 worth routing to is the reason a cost-aware SFT/preference dataset matters
-in the first place). Backed by `backend/model_tradeoff.py`; full field
+in the first place). Backed by `backend/api/model_tradeoff.py`; full field
 list and SQL in `docs/03-backend.md`'s `model_tradeoff.py` section.
 Response: `{"items": ModelTradeoff[]}`, one entry per distinct `model`,
 each with `trace_count`, `avg_cost_usd`, `avg_latency_ms`,

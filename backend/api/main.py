@@ -15,14 +15,14 @@ from typing import Optional
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
-from exclusion_report import build_exclusion_report
-from export_preference import build_preference_export
-from export_preview import build_export_preview
-from export_sft import build_sft_export, fetch_all_traces
-from model_tradeoff import compute_model_tradeoff
-from schema import Trace
+from api.model_tradeoff import compute_model_tradeoff
+from core.schema import Trace
+from exports.exclusion_report import build_exclusion_report
+from exports.export_preference import build_preference_export
+from exports.export_preview import build_export_preview
+from exports.export_sft import build_sft_export, fetch_all_traces
 
-DB_PATH = Path(__file__).resolve().parent.parent / "data" / "traces.db"
+DB_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "traces.db"
 
 app = FastAPI(title="Riften Trace Inspector API")
 

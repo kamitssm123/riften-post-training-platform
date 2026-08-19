@@ -3,10 +3,10 @@
 Fixed the trace generator's content-pairing bug (questions and responses
 were sampled independently from two flat pools, so a topic's question and
 its own response were frequently unrelated) by replacing the flat pools
-with a topic-locked content bank (`backend/content_bank.py`) and rewriting
+with a topic-locked content bank (`backend/generation/content_bank.py`) and rewriting
 the generator's content-selection logic to always draw a trace's question
-and response from the same topic exchange (`backend/generate_corpus.py`).
-Scored with the new `backend/corpus_quality_check.py`.
+and response from the same topic exchange (`backend/generation/generate_corpus.py`).
+Scored with the new `backend/quality/corpus_quality_check.py`.
 
 | Metric | Before | After | Target |
 |---|---|---|---|
@@ -37,14 +37,14 @@ content coherence.
 
 ## What changed
 
-- **Phase 1** (`backend/content_bank.py`): 22 topic domains (15
+- **Phase 1** (`backend/generation/content_bank.py`): 22 topic domains (15
   non-agentic, 7 agentic), each a short thread of question/answer
   "exchanges." Every question variant in an exchange can be paired with
   any answer variant from the same exchange and stay topically correct by
   construction — an exhaustive audit checks every question × answer
   combination in the bank, including worst-case truncated prefixes, for a
   shared non-stopword keyword.
-- **Phase 2** (`backend/generate_corpus.py`): the generator now picks a
+- **Phase 2** (`backend/generation/generate_corpus.py`): the generator now picks a
   topic first, then draws the question and response from that topic's
   current exchange. Multi-turn sessions either move to a new topic or
   advance to a natural follow-up exchange within the current topic;
@@ -54,7 +54,7 @@ content coherence.
   sentence. Retry and continuation sibling traces exclude each other's
   response text, so `chosen`/`rejected` pairs are no longer byte-identical
   (a gap previously called out in `docs/08-known-gaps.md`).
-- **Phase 3** (`backend/corpus_quality_check.py`): a standalone 0–100
+- **Phase 3** (`backend/quality/corpus_quality_check.py`): a standalone 0–100
   scorer (category coverage 40 pts, content coherence 40 pts, diversity 20
   pts) used to validate the fix and guard against future regressions.
 

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from exclusion_rules import compute_preference_plan, compute_sft_plan
+from exports.exclusion_rules import compute_preference_plan, compute_sft_plan
 
 SFT_REASON_DETAIL = {
     "non_2xx_response": lambda t, _plan: f"status_code is {t['status_code']}, not in the 2xx range",

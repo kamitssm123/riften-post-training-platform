@@ -10,10 +10,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from export_preference import build_preference_export
-from export_sft import build_sft_export
+from exports.export_preference import build_preference_export
+from exports.export_sft import build_sft_export
 
-DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
 EXPORTS_DIR = DATA_DIR / "exports"
 OUT_PATH = EXPORTS_DIR / "exclusion_report.md"
 

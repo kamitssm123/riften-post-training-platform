@@ -2,7 +2,7 @@
 
 ## Generation parameters actually used
 
-Read directly from `backend/generate_corpus.py`'s constants and
+Read directly from `backend/generation/generate_corpus.py`'s constants and
 `generate()`'s logic — not the target ranges from the original spec (those
 were 300-400 traces / 100-150 sessions; the actual generator constants are
 narrower and are reproduced here as written):
@@ -85,8 +85,8 @@ was found to produce output inside them given the fixed seed.
 Computed by querying the live `/data/traces.db` directly (`sqlite3` CLI
 equivalent of the queries below run via Python in this session) —
 regenerating the corpus reproduces these exact numbers, since the generator
-is seeded, but re-running `python generate_corpus.py` will still shift the
-`timestamp` column (see `docs/02-workflow.md`).
+is seeded, but re-running `python -m generation.generate_corpus` will still
+shift the `timestamp` column (see `docs/02-workflow.md`).
 
 **Totals**: 381 traces across 135 sessions.
 
