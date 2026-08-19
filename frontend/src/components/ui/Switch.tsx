@@ -17,7 +17,7 @@ export function Switch({ checked, onCheckedChange, id, disabled }: Props) {
       className="relative h-5 w-9 shrink-0 cursor-pointer rounded-full border transition-colors duration-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
       style={{
         borderColor: checked ? "var(--accent)" : "var(--border-strong)",
-        background: checked ? "var(--accent)" : "var(--bg-hover)",
+        background: checked ? "var(--accent)" : "var(--border-strong)",
         outlineColor: "var(--ring)",
       }}
     >
