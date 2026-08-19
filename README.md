@@ -11,6 +11,44 @@ calls, no production traffic — traces are generated locally by a script that
 simulates realistic messiness (retries, tool errors, truncation, multi-turn
 sessions).
 
+## High-Level Design
+
+```mermaid
+flowchart LR
+    subgraph Generation
+        GEN["generation/\ngenerate_corpus.py"]
+    end
+
+    subgraph Storage
+        JSON[("traces.json")]
+        DB[("SQLite\ntraces.db")]
+    end
+
+    subgraph Backend["Backend · FastAPI"]
+        API["api/main.py"]
+        EXP["exports/*"]
+    end
+
+    subgraph Frontend["Frontend · React/Vite"]
+        UI["Trace Inspector UI"]
+    end
+
+    subgraph Outputs["Export files"]
+        SFT[("sft.jsonl")]
+        PREF[("preference.jsonl")]
+        REPORT[("exclusion_report.md")]
+    end
+
+    GEN -->|writes| JSON
+    JSON -->|"db/ingest.py"| DB
+    DB --> API
+    API <--> UI
+    API --> EXP
+    EXP --> SFT
+    EXP --> PREF
+    EXP --> REPORT
+```
+
 ## Stack
 
 - **Backend**: Python (FastAPI) — good fit for data/export scripting and a
