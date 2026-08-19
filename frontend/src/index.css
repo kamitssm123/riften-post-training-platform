@@ -223,6 +223,13 @@ pre {
     -webkit-backdrop-filter: blur(12px);
   }
 
+  .brand-mark {
+    filter: none;
+  }
+  [data-theme="light"] .brand-mark {
+    filter: invert(1);
+  }
+
   .chip {
     @apply inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium;
     border-color: var(--border);

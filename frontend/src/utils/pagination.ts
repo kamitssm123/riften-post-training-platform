@@ -33,11 +33,11 @@ export function getPageSlots(current: number, total: number): PageSlot[] {
     slots[5] = { kind: "page", page: 6 };
     slots[6] = innerHi > 6 ? { kind: "ellipsis" } : { kind: "empty" };
   } else if (current >= innerHi - 2) {
-    slots[2] = innerLo < innerHi - 3 ? { kind: "ellipsis" } : { kind: "empty" };
-    slots[3] = { kind: "page", page: innerHi - 2 };
-    slots[4] = { kind: "page", page: innerHi - 1 };
-    slots[5] = { kind: "page", page: innerHi };
-    slots[6] = { kind: "empty" };
+    slots[2] = innerHi - 3 > innerLo ? { kind: "ellipsis" } : { kind: "empty" };
+    slots[3] = { kind: "page", page: innerHi - 3 };
+    slots[4] = { kind: "page", page: innerHi - 2 };
+    slots[5] = { kind: "page", page: innerHi - 1 };
+    slots[6] = { kind: "page", page: innerHi };
   } else {
     slots[2] = { kind: "ellipsis" };
     slots[3] = { kind: "page", page: current - 1 };

@@ -1,5 +1,5 @@
 import { FileWarning, Layers, LineChart, Sparkles } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   fetchExclusionReport,
   fetchExportPreview,
@@ -18,7 +18,9 @@ import { StatsOverview } from "./components/StatsOverview";
 import { ThemeSwitcher } from "./components/ThemeSwitcher";
 import { TraceDetail } from "./components/TraceDetail";
 import { TraceTable } from "./components/TraceTable";
+import { useRouter } from "./hooks/useRouter";
 import { useTheme } from "./hooks/useTheme";
+import { pathForRoute, parsePath } from "./routes";
 import type { ExclusionReport } from "./types/exclusion";
 import type { ExportPreview } from "./types/exportPreview";
 import type { ModelTradeoff } from "./types/modelTradeoff";
@@ -43,7 +45,24 @@ type Panel =
 
 export default function App() {
   const { theme, setTheme } = useTheme();
-  const [mainView, setMainView] = useState<MainView>("traces");
+  const { pathname, navigate } = useRouter();
+  const route = useMemo(() => parsePath(pathname), [pathname]);
+
+  const mainView: MainView = route.name === "tradeoff" ? "tradeoff" : "traces";
+  const panel: Panel = useMemo<Panel>(() => {
+    if (route.name === "trace") return { kind: "trace", id: route.id };
+    if (route.name === "session") return { kind: "session", id: route.id };
+    if (route.name === "exclusions") return { kind: "exclusions" };
+    return { kind: "none" };
+  }, [route]);
+
+  const goTraces = () => navigate(pathForRoute({ name: "traces" }));
+  const goTradeoff = () => navigate(pathForRoute({ name: "tradeoff" }));
+  const goExclusions = () => navigate(pathForRoute({ name: "exclusions" }));
+  const openTrace = (id: string) => navigate(pathForRoute({ name: "trace", id }));
+  const openSession = (id: string) => navigate(pathForRoute({ name: "session", id }));
+  const closePanel = () => navigate(pathForRoute({ name: "traces" }));
+
   const [filters, setFilters] = useState<TraceFilters>(EMPTY_FILTERS);
   const [page, setPage] = useState(1);
   const [traces, setTraces] = useState<TraceSummary[]>([]);
@@ -53,7 +72,6 @@ export default function App() {
   const [tradeoff, setTradeoff] = useState<ModelTradeoff[] | null>(null);
   const [tradeoffLoading, setTradeoffLoading] = useState(false);
 
-  const [panel, setPanel] = useState<Panel>({ kind: "none" });
   const [traceDetail, setTraceDetail] = useState<TraceDetailT | null>(null);
   const [session, setSession] = useState<SessionResponse | null>(null);
   const [exclusionReport, setExclusionReport] = useState<ExclusionReport | null>(null);
@@ -115,12 +133,16 @@ export default function App() {
           setPanelLoading(false);
         }
       });
-      fetchExportPreview(panel.id).then((res) => {
-        if (!cancelled) {
-          setExportPreview(res);
-          setExportPreviewLoading(false);
-        }
-      });
+      fetchExportPreview(panel.id)
+        .then((res) => {
+          if (!cancelled) {
+            setExportPreview(res);
+            setExportPreviewLoading(false);
+          }
+        })
+        .catch(() => {
+          if (!cancelled) setExportPreviewLoading(false);
+        });
       return () => {
         cancelled = true;
       };
@@ -173,7 +195,13 @@ export default function App() {
         <div className="flex items-center gap-3">
           <div>
             <div className="flex items-center gap-2">
-              <span className="text-[15px] font-bold tracking-tight">riften</span>
+              <img src="/logo-mark.png" alt="" className="brand-mark h-4 w-4 shrink-0" />
+              <span
+                className="text-[13px] font-medium uppercase text-[var(--text)]"
+                style={{ fontFamily: "var(--mono)", letterSpacing: "0.08em" }}
+              >
+                riften
+              </span>
               <span className="chip">
                 <Sparkles size={9} />
                 Trace Inspector
@@ -183,7 +211,7 @@ export default function App() {
         </div>
         <div className="flex items-center gap-2">
           <button
-            onClick={() => setMainView("traces")}
+            onClick={goTraces}
             className={`btn flex items-center gap-1.5 !text-[11px] ${
               mainView === "traces" ? "btn-active" : ""
             }`}
@@ -192,7 +220,7 @@ export default function App() {
             Traces
           </button>
           <button
-            onClick={() => setMainView("tradeoff")}
+            onClick={goTradeoff}
             className={`btn flex items-center gap-1.5 !text-[11px] ${
               mainView === "tradeoff" ? "btn-active" : ""
             }`}
@@ -201,7 +229,7 @@ export default function App() {
             Model tradeoff
           </button>
           <button
-            onClick={() => setPanel({ kind: "exclusions" })}
+            onClick={goExclusions}
             className={`btn flex items-center gap-1.5 !text-[11px] ${
               panel.kind === "exclusions" ? "btn-active" : ""
             }`}
@@ -249,7 +277,7 @@ export default function App() {
                 <TraceTable
                   traces={traces}
                   loading={tableLoading}
-                  onSelect={(id) => setPanel({ kind: "trace", id })}
+                  onSelect={openTrace}
                   selectedId={panel.kind === "trace" ? panel.id : null}
                 />
               </div>
@@ -288,25 +316,25 @@ export default function App() {
                 loading={panelLoading}
                 exportPreview={exportPreview}
                 exportPreviewLoading={exportPreviewLoading}
-                onOpenSession={(sessionId) => setPanel({ kind: "session", id: sessionId })}
-                onSelectTrace={(id) => setPanel({ kind: "trace", id })}
-                onClose={() => setPanel({ kind: "none" })}
+                onOpenSession={openSession}
+                onSelectTrace={openTrace}
+                onClose={closePanel}
               />
             )}
             {panel.kind === "session" && (
               <SessionThread
                 session={session}
                 loading={panelLoading}
-                onSelectTrace={(id) => setPanel({ kind: "trace", id })}
-                onClose={() => setPanel({ kind: "none" })}
+                onSelectTrace={openTrace}
+                onClose={closePanel}
               />
             )}
             {panel.kind === "exclusions" && (
               <ExclusionPanel
                 report={exclusionReport}
                 loading={panelLoading}
-                onClose={() => setPanel({ kind: "none" })}
-                onInspectTrace={(id) => setPanel({ kind: "trace", id })}
+                onClose={closePanel}
+                onInspectTrace={openTrace}
               />
             )}
           </div>

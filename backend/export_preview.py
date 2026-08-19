@@ -45,8 +45,9 @@ def build_sft_preview(trace_id: str, all_traces: list[dict[str, Any]]) -> dict[s
     if entry["included"]:
         return {"included": True, "reason": None, "detail": "included in sft.jsonl"}
 
+    trace = next((t for t in all_traces if t["trace_id"] == trace_id), None)
     detail_fn = SFT_REASON_DETAIL.get(entry["reason"])
-    detail = detail_fn(None, entry) if detail_fn else None
+    detail = detail_fn(trace, entry) if detail_fn else None
     return {"included": False, "reason": entry["reason"], "detail": detail}
 
 

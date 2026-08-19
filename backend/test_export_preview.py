@@ -40,6 +40,14 @@ def test_superseded_by_longer_session_trace_names_the_superseding_trace():
     assert "b" in preview["sft"]["detail"]
 
 
+def test_non_2xx_response_names_the_status_code():
+    traces = [trace(trace_id="a", session_id="s1", turn_index=0, status_code=502)]
+    preview = export_preview.build_export_preview("a", traces)
+    assert preview["sft"]["included"] is False
+    assert preview["sft"]["reason"] == "non_2xx_response"
+    assert preview["sft"]["detail"] == "status_code is 502, not in the 2xx range"
+
+
 def test_included_trace_reports_included_true():
     traces = [trace(trace_id="a", session_id="s1", turn_index=0)]
     preview = export_preview.build_export_preview("a", traces)

@@ -17,7 +17,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from exclusion_report import build_exclusion_report
 from export_preference import build_preference_export
-from export_sft import build_sft_export
+from export_preview import build_export_preview
+from export_sft import build_sft_export, fetch_all_traces
 from model_tradeoff import compute_model_tradeoff
 from schema import Trace
 
@@ -185,6 +186,14 @@ def get_trace(trace_id: str):
         return Trace.from_row(dict(row))
     finally:
         conn.close()
+
+
+@app.get("/traces/{trace_id}/export-preview")
+def get_export_preview(trace_id: str):
+    traces = fetch_all_traces()
+    if not any(t["trace_id"] == trace_id for t in traces):
+        raise HTTPException(status_code=404, detail="trace not found")
+    return build_export_preview(trace_id, traces)
 
 
 @app.get("/sessions/{session_id}")
