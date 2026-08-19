@@ -18,6 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from exclusion_report import build_exclusion_report
 from export_preference import build_preference_export
 from export_sft import build_sft_export
+from model_tradeoff import compute_model_tradeoff
 from schema import Trace
 
 DB_PATH = Path(__file__).resolve().parent.parent / "data" / "traces.db"
@@ -281,6 +282,18 @@ def get_stats(
             "truncated_count": truncated_count,
             "truncated_rate": round(truncated_count / total, 4) if total else 0.0,
         }
+    finally:
+        conn.close()
+
+
+@app.get("/stats/model-tradeoff")
+def get_model_tradeoff():
+    """Average cost vs. average quality, per model -- the one analysis that
+    validates Riften's cost-aware routing pitch using this project's own
+    data."""
+    conn = get_connection()
+    try:
+        return {"items": compute_model_tradeoff(conn)}
     finally:
         conn.close()
 

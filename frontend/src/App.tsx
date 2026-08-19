@@ -1,8 +1,16 @@
-import { FileWarning, Sparkles } from "lucide-react";
+import { FileWarning, Layers, LineChart, Sparkles } from "lucide-react";
 import { useEffect, useState } from "react";
-import { fetchExclusionReport, fetchSession, fetchStats, fetchTrace, fetchTraces } from "./api/client";
+import {
+  fetchExclusionReport,
+  fetchModelTradeoff,
+  fetchSession,
+  fetchStats,
+  fetchTrace,
+  fetchTraces,
+} from "./api/client";
 import { ExclusionPanel } from "./components/ExclusionPanel";
 import { FilterRail } from "./components/FilterRail";
+import { ModelTradeoffView } from "./components/ModelTradeoffView";
 import { Pagination } from "./components/Pagination";
 import { SessionThread } from "./components/SessionThread";
 import { StatsOverview } from "./components/StatsOverview";
@@ -11,6 +19,7 @@ import { TraceDetail } from "./components/TraceDetail";
 import { TraceTable } from "./components/TraceTable";
 import { useTheme } from "./hooks/useTheme";
 import type { ExclusionReport } from "./types/exclusion";
+import type { ModelTradeoff } from "./types/modelTradeoff";
 import {
   EMPTY_FILTERS,
   type SessionResponse,
@@ -22,6 +31,8 @@ import {
 
 const PAGE_SIZE = 30;
 
+type MainView = "traces" | "tradeoff";
+
 type Panel =
   | { kind: "none" }
   | { kind: "trace"; id: string }
@@ -30,12 +41,15 @@ type Panel =
 
 export default function App() {
   const { theme, setTheme } = useTheme();
+  const [mainView, setMainView] = useState<MainView>("traces");
   const [filters, setFilters] = useState<TraceFilters>(EMPTY_FILTERS);
   const [page, setPage] = useState(1);
   const [traces, setTraces] = useState<TraceSummary[]>([]);
   const [total, setTotal] = useState(0);
   const [stats, setStats] = useState<Stats | null>(null);
   const [tableLoading, setTableLoading] = useState(false);
+  const [tradeoff, setTradeoff] = useState<ModelTradeoff[] | null>(null);
+  const [tradeoffLoading, setTradeoffLoading] = useState(false);
 
   const [panel, setPanel] = useState<Panel>({ kind: "none" });
   const [traceDetail, setTraceDetail] = useState<TraceDetailT | null>(null);
@@ -70,6 +84,20 @@ export default function App() {
       cancelled = true;
     };
   }, [filters]);
+
+  useEffect(() => {
+    if (mainView !== "tradeoff") return;
+    let cancelled = false;
+    setTradeoffLoading(true);
+    fetchModelTradeoff().then((res) => {
+      if (cancelled) return;
+      setTradeoff(res.items);
+      setTradeoffLoading(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [mainView]);
 
   useEffect(() => {
     if (panel.kind === "trace") {
@@ -143,6 +171,24 @@ export default function App() {
         </div>
         <div className="flex items-center gap-2">
           <button
+            onClick={() => setMainView("traces")}
+            className={`btn flex items-center gap-1.5 !text-[11px] ${
+              mainView === "traces" ? "btn-active" : ""
+            }`}
+          >
+            <Layers size={13} />
+            Traces
+          </button>
+          <button
+            onClick={() => setMainView("tradeoff")}
+            className={`btn flex items-center gap-1.5 !text-[11px] ${
+              mainView === "tradeoff" ? "btn-active" : ""
+            }`}
+          >
+            <LineChart size={13} />
+            Model tradeoff
+          </button>
+          <button
             onClick={() => setPanel({ kind: "exclusions" })}
             className={`btn flex items-center gap-1.5 !text-[11px] ${
               panel.kind === "exclusions" ? "btn-active" : ""
@@ -160,56 +206,64 @@ export default function App() {
       </header>
 
       <div className="flex min-h-0 flex-1">
-        <FilterRail
-          filters={filters}
-          onChange={setFilters}
-          stats={stats}
-          resultCount={total}
-        />
+        {mainView === "traces" && (
+          <FilterRail
+            filters={filters}
+            onChange={setFilters}
+            stats={stats}
+            resultCount={total}
+          />
+        )}
 
-        <main className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden p-4">
-          <StatsOverview stats={stats} resultCount={total} />
+        {mainView === "traces" ? (
+          <main className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden p-4">
+            <StatsOverview stats={stats} resultCount={total} />
 
-          <div
-            className="relative min-h-0 flex-1 overflow-hidden rounded-xl border"
-            style={{ borderColor: "var(--border)", background: "var(--bg-raised)" }}
-          >
-            {tableLoading && (
-              <div className="pointer-events-none absolute inset-x-0 top-0 z-20 h-0.5 overflow-hidden rounded-t-xl">
-                <div
-                  className="h-full w-1/3 animate-[shimmer_1s_ease-in-out_infinite]"
-                  style={{
-                    background: "linear-gradient(90deg, transparent, var(--brand), transparent)",
-                  }}
+            <div
+              className="relative min-h-0 flex-1 overflow-hidden rounded-xl border"
+              style={{ borderColor: "var(--border)", background: "var(--bg-raised)" }}
+            >
+              {tableLoading && (
+                <div className="pointer-events-none absolute inset-x-0 top-0 z-20 h-0.5 overflow-hidden rounded-t-xl">
+                  <div
+                    className="h-full w-1/3 animate-[shimmer_1s_ease-in-out_infinite]"
+                    style={{
+                      background: "linear-gradient(90deg, transparent, var(--brand), transparent)",
+                    }}
+                  />
+                </div>
+              )}
+              <div className={`h-full overflow-auto ${tableLoading ? "opacity-70 transition-opacity" : ""}`}>
+                <TraceTable
+                  traces={traces}
+                  loading={tableLoading}
+                  onSelect={(id) => setPanel({ kind: "trace", id })}
+                  selectedId={panel.kind === "trace" ? panel.id : null}
                 />
               </div>
-            )}
-            <div className={`h-full overflow-auto ${tableLoading ? "opacity-70 transition-opacity" : ""}`}>
-              <TraceTable
-                traces={traces}
-                loading={tableLoading}
-                onSelect={(id) => setPanel({ kind: "trace", id })}
-                selectedId={panel.kind === "trace" ? panel.id : null}
-              />
             </div>
-          </div>
 
-          <div
-            className="flex shrink-0 items-center justify-between rounded-xl border px-4 py-2.5 text-[11px]"
-            style={{
-              borderColor: "var(--border)",
-              background: "var(--bg-raised)",
-            }}
-          >
-            <span className="text-[var(--text-faint)]">
-              Page <span className="font-semibold text-[var(--text)]">{page}</span> of{" "}
-              <span className="font-semibold text-[var(--text)]">{totalPages}</span>
-              <span className="mx-2 text-[var(--border-strong)]">·</span>
-              <span className="font-semibold text-[var(--text)]">{total}</span> traces
-            </span>
-            <Pagination page={page} totalPages={totalPages} onChange={setPage} />
-          </div>
-        </main>
+            <div
+              className="flex shrink-0 items-center justify-between rounded-xl border px-4 py-2.5 text-[11px]"
+              style={{
+                borderColor: "var(--border)",
+                background: "var(--bg-raised)",
+              }}
+            >
+              <span className="text-[var(--text-faint)]">
+                Page <span className="font-semibold text-[var(--text)]">{page}</span> of{" "}
+                <span className="font-semibold text-[var(--text)]">{totalPages}</span>
+                <span className="mx-2 text-[var(--border-strong)]">·</span>
+                <span className="font-semibold text-[var(--text)]">{total}</span> traces
+              </span>
+              <Pagination page={page} totalPages={totalPages} onChange={setPage} />
+            </div>
+          </main>
+        ) : (
+          <main className="min-h-0 flex-1 overflow-auto p-4">
+            <ModelTradeoffView items={tradeoff} loading={tradeoffLoading} />
+          </main>
+        )}
 
         {panel.kind !== "none" && (
           <div

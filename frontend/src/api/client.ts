@@ -1,4 +1,6 @@
 import type { ExclusionReport } from "../types/exclusion";
+import type { ExportPreview } from "../types/exportPreview";
+import type { ModelTradeoffResponse } from "../types/modelTradeoff";
 import type {
   SessionResponse,
   Stats,
@@ -59,5 +61,17 @@ export async function fetchStats(filters: Partial<TraceFilters>): Promise<Stats>
 export async function fetchExclusionReport(): Promise<ExclusionReport> {
   const res = await fetch(`${BASE}/export/exclusions`);
   if (!res.ok) throw new Error(`GET /export/exclusions failed: ${res.status}`);
+  return res.json();
+}
+
+export async function fetchModelTradeoff(): Promise<ModelTradeoffResponse> {
+  const res = await fetch(`${BASE}/stats/model-tradeoff`);
+  if (!res.ok) throw new Error(`GET /stats/model-tradeoff failed: ${res.status}`);
+  return res.json();
+}
+
+export async function fetchExportPreview(traceId: string): Promise<ExportPreview> {
+  const res = await fetch(`${BASE}/traces/${traceId}/export-preview`);
+  if (!res.ok) throw new Error(`GET /traces/${traceId}/export-preview failed: ${res.status}`);
   return res.json();
 }
