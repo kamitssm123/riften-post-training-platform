@@ -64,9 +64,31 @@ def test_retrial_pair(load):
         ]
     )
     result = export_preference.build_preference_export()
-    assert result["pair_count"] == 1
     assert result["pairs_by_source"]["retrial"] == 1
-    # the weak trace was consumed by the retrial pair, not double-counted
+    assert result["excluded_by_reason"] == {}
+
+
+def test_retrial_loser_also_produces_weak_rating_pair(load):
+    # A trace can be both the discarded side of a retrial *and* a valid
+    # weak-rating candidate against the same winner -- these are two
+    # independent signals and both should produce a pair.
+    load(
+        [
+            trace(trace_id="bad", session_id="s1", turn_index=0, feedback="weak"),
+            trace(
+                trace_id="good",
+                session_id="s1",
+                turn_index=0,
+                is_retrial=True,
+                retrial_of="bad",
+                feedback="strong",
+            ),
+        ]
+    )
+    result = export_preference.build_preference_export()
+    assert result["pair_count"] == 2
+    assert result["pairs_by_source"]["retrial"] == 1
+    assert result["pairs_by_source"]["weak_rating"] == 1
     assert result["excluded_by_reason"] == {}
 
 

@@ -11,6 +11,7 @@ The `select_session_representative` / `row_level_exclusion_reason` /
 """
 from __future__ import annotations
 
+import json
 from collections import defaultdict
 from typing import Any
 
@@ -53,9 +54,9 @@ def select_session_representative(session_traces: list[dict]) -> tuple[dict, lis
     if len(preferred) == 1:
         kept = preferred[0]
     elif len(preferred) > 1:
-        kept = max(preferred, key=lambda t: t["timestamp"])
+        kept = max(preferred, key=lambda t: len(t["messages"]))
     else:
-        kept = max(candidates, key=lambda t: t["timestamp"])
+        kept = max(candidates, key=lambda t: len(t["messages"]))
 
     superseded += [t for t in candidates if t["trace_id"] != kept["trace_id"]]
     return kept, superseded
@@ -112,10 +113,22 @@ def compute_sft_plan(traces: list[dict]) -> dict[str, Any]:
 
         reason = row_level_exclusion_reason(kept, by_id)
         if reason:
-            excluded[reason].append(kept["trace_id"])
+            # If this session had more than one trace, `kept` is the
+            # session's *longest* trace (the one collapsing picked as the
+            # representative) -- when it fails a row-level check, the whole
+            # session is excluded from SFT. That's a distinct situation
+            # from a single-trace session simply failing the same check, so
+            # it gets its own bucket rather than reusing `reason` directly:
+            # a shorter trace from later in `superseded` is never used as a
+            # fallback (it would just be a redundant prefix of the same
+            # conversation).
+            is_multi_trace_session = len(session_traces) > 1
+            bucket = "session_longest_trace_excluded" if is_multi_trace_session else reason
+            excluded[bucket].append(kept["trace_id"])
             per_trace[kept["trace_id"]] = {
                 "included": False,
-                "reason": reason,
+                "reason": bucket,
+                "row_level_reason": reason,
                 "superseded_by_trace_id": (
                     retrial_winner_of(kept["trace_id"], by_id)["trace_id"]
                     if reason == "superseded_by_retrial"
@@ -127,11 +140,35 @@ def compute_sft_plan(traces: list[dict]) -> dict[str, Any]:
             per_trace[kept["trace_id"]] = {
                 "included": True,
                 "reason": None,
+                "row_level_reason": None,
                 "superseded_by_trace_id": None,
             }
 
+    # Hard uniqueness safety net, independent of how a duplicate got here:
+    # no two rows written to sft.jsonl may share a trace_id or an identical
+    # `messages` array (the latter can happen when two different sessions'
+    # canonical traces are byte-identical conversations). Keep the first
+    # occurrence in session order; drop and log the rest.
+    deduped_rows: list[dict] = []
+    seen_trace_ids: set[str] = set()
+    seen_message_keys: set[str] = set()
+    for t in kept_rows:
+        message_key = json.dumps(t["messages"] + [t["response"]], sort_keys=True)
+        if t["trace_id"] in seen_trace_ids or message_key in seen_message_keys:
+            excluded["duplicate_message_content"].append(t["trace_id"])
+            per_trace[t["trace_id"]] = {
+                "included": False,
+                "reason": "duplicate_message_content",
+                "row_level_reason": None,
+                "superseded_by_trace_id": None,
+            }
+            continue
+        seen_trace_ids.add(t["trace_id"])
+        seen_message_keys.add(message_key)
+        deduped_rows.append(t)
+
     return {
-        "kept_rows": kept_rows,
+        "kept_rows": deduped_rows,
         "excluded_by_reason": dict(excluded),
         "total_sessions": len(by_session),
         "per_trace": per_trace,
@@ -207,9 +244,15 @@ def compute_preference_plan(traces: list[dict]) -> dict[str, Any]:
 
     # 2. Weak ratings: paired against an ok/strong trace at the same
     # session+turn_index, if one exists. Never fabricate a chosen response
-    # from an unrelated context -- skip and log otherwise.
+    # from an unrelated context -- skip and log otherwise. Deliberately NOT
+    # gated on `used_rejected_ids`: a weak-feedback trace that already lost
+    # a same-turn retrial is still a genuine weak-rating pairing candidate
+    # against whatever ok/strong trace shares its turn -- these are two
+    # independent signals (the retrial and the rating) and skipping the
+    # search here was starving this source entirely whenever the two
+    # signals happened to coincide on the same trace.
     for t in traces:
-        if t["feedback"] != "weak" or t["trace_id"] in used_rejected_ids:
+        if t["feedback"] != "weak":
             continue
         candidates = [
             c

@@ -23,6 +23,14 @@ SFT_REASON_DETAIL = {
         f"trace {plan['superseded_by_trace_id']} in the same session has a higher "
         "turn_index and was kept as the session's representative instead"
     ),
+    "session_longest_trace_excluded": lambda t, plan: (
+        "this was the session's longest trace, but it failed a row-level "
+        f"check ({plan['row_level_reason']}) -- the whole session is "
+        "excluded rather than falling back to a shorter trace"
+    ),
+    "duplicate_message_content": lambda t, _plan: (
+        "another kept row already has an identical messages array"
+    ),
 }
 
 
