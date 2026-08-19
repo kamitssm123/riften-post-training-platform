@@ -131,7 +131,6 @@ export default function App() {
         }}
       >
         <div className="flex items-center gap-3">
-          <img src="/favicon.svg" alt="riften" className="h-8 w-8 drop-shadow-sm" />
           <div>
             <div className="flex items-center gap-2">
               <span className="text-[15px] font-bold tracking-tight">riften</span>
