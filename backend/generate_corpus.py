@@ -7,6 +7,14 @@ SQLite). Deliberately messy: retries, tool errors, truncated responses,
 mixed models skewed toward cheaper ones, multi-turn sessions that resend
 the full transcript each turn, and agentic continuation accept/reject pairs.
 
+Content is drawn from the topic-locked bank in content_bank.py: every trace
+picks a Topic first, then draws its question and response from the same
+Exchange within that topic, so a trace's response is always about what its
+own question asked. Session-internal question repetition only happens for
+genuine retries (paired with is_retrial/retrial_of); any other multi-turn
+session either moves to a new topic or advances to a natural follow-up
+exchange within the current topic.
+
 Deterministic via a fixed random seed so runs are reproducible.
 """
 from __future__ import annotations
@@ -17,6 +25,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from content_bank import AGENTIC_TOPICS, NON_AGENTIC_TOPICS, Exchange, Topic
 from schema import MODEL_LATENCY_MS, MODEL_PRICING_PER_1K, Model
 
 random.seed(42)
@@ -46,80 +55,10 @@ SYSTEM_PROMPT = (
     "developer tools product. Answer concisely and use tools when needed."
 )
 
-TOPICS = [
-    ("How do I reset a user's password via the admin API?",
-     "Call `POST /admin/users/{{id}}/reset-password` with a valid admin "
-     "token. This invalidates existing sessions and emails the user a "
-     "reset link."),
-    ("Why is my webhook delivery failing with a timeout?",
-     "Your endpoint is likely taking longer than the 5s delivery timeout. "
-     "Move slow processing to a background job and return a 200 "
-     "immediately on receipt."),
-    ("What's the difference between the `sync` and `async` client modes?",
-     "`sync` blocks until the response is fully received; `async` returns "
-     "a future/promise you can await, useful for concurrent requests."),
-    ("Can you summarize this changelog entry for release notes?",
-     "Added rate-limit headers to all API responses, fixed a race "
-     "condition in session refresh, and deprecated the v1 `/search` "
-     "endpoint in favor of v2."),
-    ("How do I paginate through a large export?",
-     "Use the `cursor` field returned in each page's response and pass it "
-     "as `?cursor=...` on the next request until the field is null."),
-    ("Write a regex to validate US phone numbers.",
-     "`^\\(?\\d{3}\\)?[-.\\s]?\\d{3}[-.\\s]?\\d{4}$` matches common US "
-     "phone number formats with optional separators."),
-    ("Draft a short apology email for a billing overcharge.",
-     "Subject: We're sorry about the billing error\\n\\nHi there, we "
-     "identified an overcharge on your last invoice and have issued a "
-     "full refund, which should post within 3-5 business days."),
-    ("Explain exponential backoff in one paragraph.",
-     "Exponential backoff retries a failed request with progressively "
-     "longer delays (e.g. 1s, 2s, 4s, 8s), often with jitter, to avoid "
-     "overwhelming a struggling service."),
-    ("What status code should I return for a rate-limited request?",
-     "Return `429 Too Many Requests`, ideally with a `Retry-After` header "
-     "indicating when the client can try again."),
-    ("Convert this CSV row into a JSON object for me.",
-     "Given the header row and values, here's the resulting JSON object "
-     "with each column mapped to its corresponding field."),
-    ("Debug why this SQL query returns duplicate rows.",
-     "The join against the `orders` table is one-to-many without "
-     "aggregation, so each matching order row duplicates the parent "
-     "record. Add a `GROUP BY` or use a window function."),
-    ("Help me write a cron expression for every weekday at 9am.",
-     "`0 9 * * 1-5` runs at 9:00 AM Monday through Friday."),
-]
-
-AGENTIC_TOPICS = [
-    ("Look up the current status of order #48213 and refund it if it's "
-     "still pending.",
-     "lookup_order", {"order_id": "48213"},
-     "I checked order #48213 and it's still pending, so I've issued a full refund."),
-    ("Check disk usage on the prod-db-2 host and restart the service if "
-     "it's above 90%.",
-     "check_disk_usage", {"host": "prod-db-2"},
-     "Disk usage on prod-db-2 is at 94%, so I restarted the service and cleared temp logs."),
-    ("Find the customer record for jane@example.com and update their plan "
-     "to Pro.",
-     "lookup_customer", {"email": "jane@example.com"},
-     "Found the customer record and upgraded jane@example.com to the Pro plan."),
-    ("Search recent deploys for the payments service and tell me if the "
-     "last one succeeded.",
-     "search_deploys", {"service": "payments"},
-     "The last deploy for the payments service completed successfully 2 hours ago."),
-    ("Pull the latest error logs for the ingestion worker and summarize "
-     "the top issue.",
-     "fetch_logs", {"service": "ingestion-worker"},
-     "The top recurring error is a connection timeout to the upstream queue, "
-     "occurring roughly every 10 minutes."),
-]
-
-TRUNCATION_CUTS = [
-    "Here's how you can approach this: first, you'll want to check the",
-    "The root cause is most likely related to a race condition between the",
-    "Sure, here's a draft: \"Thank you for reaching out regarding your",
-    "To fix this, update the configuration file so that the timeout value",
-]
+# Probability that a non-retry turn after the first continues the current
+# topic via its next follow-up exchange (when one is available) instead of
+# jumping to a brand new topic.
+FOLLOW_UP_PROBABILITY = 0.5
 
 
 def now_iso(offset_seconds: int = 0) -> str:
@@ -148,17 +87,44 @@ def latency_for(model: Model) -> int:
     return max(80, int(random.gauss(base, base * 0.25)))
 
 
+def pick_topic(pool: list[Topic], exclude_id: str | None = None) -> Topic:
+    candidates = [t for t in pool if t.id != exclude_id] or pool
+    return random.choice(candidates)
+
+
+def pick_question(exchange: Exchange, used: set[str]) -> str:
+    available = [q for q in exchange.questions if q not in used] or list(exchange.questions)
+    question = random.choice(available)
+    used.add(question)
+    return question
+
+
+def pick_answer(pool: list[str], exclude: str | None = None) -> str:
+    candidates = [a for a in pool if a != exclude] or pool
+    return random.choice(candidates)
+
+
+def truncated_text(answer: str) -> str:
+    """Simulate a cut-off response as a prefix of a real, on-topic answer
+    rather than an unrelated canned sentence, so truncated traces still
+    share vocabulary with their own question."""
+    words = answer.split()
+    cut = max(3, min(len(words) - 1, random.randint(6, 14))) if len(words) > 3 else len(words)
+    return " ".join(words[:cut])
+
+
 def build_trace(
     session_id: str,
     turn_index: int,
     transcript: list[dict],
     *,
+    exchange: Exchange,
+    agentic: bool,
     model: Model | None = None,
     force_status: int | None = None,
     force_finish: str | None = None,
-    tool_error: bool = False,
-    truncated: bool = False,
-    agentic: bool = False,
+    response_kind: str = "normal",  # "normal" | "alt" | "error" | "truncated"
+    exclude_answer: str | None = None,
     feedback: str | None = None,
     is_retrial: bool = False,
     retrial_of: str | None = None,
@@ -169,35 +135,38 @@ def build_trace(
 
     tool_calls = None
     finish_reason = force_finish or "stop"
-    response_text = None
     status_code = force_status or 200
-    continuation_status = None
 
-    if agentic:
-        _, tool_name, tool_args, resolution = random.choice(AGENTIC_TOPICS)
+    use_tool = agentic and exchange.tool is not None
+    tool_error = response_kind == "error"
+
+    if use_tool:
         tool_status = 500 if tool_error else 200
-        tool_result = (
-            {"status_code": tool_status, "output": "internal error: upstream unavailable"}
-            if tool_error
-            else {"status_code": 200, "output": "ok"}
-        )
-        tool_calls = [{"name": tool_name, "args": tool_args, "result": tool_result}]
-        if tool_error:
-            finish_reason = force_finish or "tool_calls"
-            status_code = force_status or 502
-            response_text = "I attempted the requested action but the tool call failed."
-        else:
-            finish_reason = force_finish or "tool_calls"
-            response_text = resolution
+        tool_result = {
+            "status_code": tool_status,
+            "output": exchange.tool.error_output if tool_error else exchange.tool.success_output,
+        }
+        tool_calls = [{"name": exchange.tool.name, "args": exchange.tool.args, "result": tool_result}]
+        finish_reason = force_finish or "tool_calls"
+        status_code = force_status or (502 if tool_error else 200)
 
-    if truncated:
+    if response_kind == "truncated":
+        base = pick_answer(exchange.answers, exclude=exclude_answer)
+        response_text = truncated_text(base)
         finish_reason = "length"
-        response_text = random.choice(TRUNCATION_CUTS)
         status_code = force_status or 200
-
-    if response_text is None:
-        _, canned = TOPICS[hash((session_id, turn_index)) % len(TOPICS)]
-        response_text = canned
+    elif response_kind == "error":
+        error_pool = exchange.error_answers or exchange.answers
+        response_text = pick_answer(error_pool, exclude=exclude_answer)
+        if not use_tool:
+            finish_reason = force_finish or "stop"
+            status_code = force_status or 502
+    else:
+        # "normal" and "alt" both draw from the exchange's own answer pool;
+        # "alt" excludes whichever answer a sibling trace at this same turn
+        # already used, so accepted/rejected and retry pairs don't end up
+        # byte-identical.
+        response_text = pick_answer(exchange.answers, exclude=exclude_answer)
 
     response = {"role": "assistant", "content": response_text}
     messages = transcript  # full transcript INCLUDING the new user turn, per spec
@@ -223,7 +192,7 @@ def build_trace(
         "feedback": feedback,
         "is_retrial": is_retrial,
         "retrial_of": retrial_of,
-        "continuation_status": continuation_status,
+        "continuation_status": None,
     }
     return trace
 
@@ -236,6 +205,8 @@ def generate() -> list[dict]:
     for s in range(num_sessions):
         session_id = str(uuid.uuid4())
         is_agentic_session = random.random() < 0.30
+        pool = AGENTIC_TOPICS if is_agentic_session else NON_AGENTIC_TOPICS
+
         # ~30%+ of sessions get 3+ turns.
         roll = random.random()
         if roll < 0.35:
@@ -250,11 +221,32 @@ def generate() -> list[dict]:
 
         transcript: list[dict] = [{"role": "system", "content": SYSTEM_PROMPT}]
 
+        current_topic: Topic | None = None
+        current_exchange_idx = 0
+        used_questions: set[str] = set()
+
         for turn in range(num_turns):
-            if is_agentic_session:
-                user_q, *_ = random.choice(AGENTIC_TOPICS)
+            if turn == 0:
+                topic = pick_topic(pool)
+                exchange_idx = 0
             else:
-                user_q, _ = random.choice(TOPICS)
+                can_follow_up = (
+                    current_topic is not None
+                    and current_exchange_idx + 1 < len(current_topic.exchanges)
+                    and random.random() < FOLLOW_UP_PROBABILITY
+                )
+                if can_follow_up:
+                    topic = current_topic
+                    exchange_idx = current_exchange_idx + 1
+                else:
+                    topic = pick_topic(pool, exclude_id=current_topic.id if current_topic else None)
+                    exchange_idx = 0
+
+            current_topic = topic
+            current_exchange_idx = exchange_idx
+            exchange = topic.exchanges[exchange_idx]
+
+            user_q = pick_question(exchange, used_questions)
             transcript.append({"role": "user", "content": user_q})
 
             t_offset += random.randint(5, 600)
@@ -269,8 +261,9 @@ def generate() -> list[dict]:
                     session_id,
                     turn,
                     list(transcript),
+                    exchange=exchange,
                     agentic=is_agentic_session and bad_kind == "tool_error",
-                    tool_error=(bad_kind == "tool_error"),
+                    response_kind="error" if bad_kind == "tool_error" else "normal",
                     force_status=502 if bad_kind == "tool_error" else 200,
                     feedback="weak" if bad_kind == "weak_feedback" else None,
                     seconds_offset=t_offset,
@@ -278,12 +271,16 @@ def generate() -> list[dict]:
                 traces.append(first)
                 t_offset += random.randint(2, 30)
 
-                # Second attempt: same session/turn_index, better outcome.
+                # Second attempt: same session/turn_index, better outcome,
+                # and a different response than the first attempt used.
                 second = build_trace(
                     session_id,
                     turn,
                     list(transcript),
+                    exchange=exchange,
                     agentic=is_agentic_session,
+                    response_kind="normal",
+                    exclude_answer=first["response"]["content"],
                     feedback=random.choice(["ok", "strong"]),
                     is_retrial=True,
                     retrial_of=first["trace_id"],
@@ -298,14 +295,15 @@ def generate() -> list[dict]:
                         ["weak", "ok", "strong"], weights=[0.25, 0.45, 0.30]
                     )[0]
 
+                response_kind = "error" if tool_error else ("truncated" if truncated else "normal")
                 trace = build_trace(
                     session_id,
                     turn,
                     list(transcript),
+                    exchange=exchange,
                     agentic=is_agentic_session,
-                    tool_error=tool_error,
-                    truncated=truncated,
-                    force_status=502 if tool_error else 200,
+                    response_kind=response_kind,
+                    force_status=502 if tool_error else None,
                     feedback=feedback,
                     seconds_offset=t_offset,
                 )
@@ -324,12 +322,15 @@ def generate() -> list[dict]:
                         session_id,
                         turn,
                         list(transcript),
+                        exchange=exchange,
                         agentic=True,
+                        response_kind="alt",
+                        exclude_answer=assistant_for_transcript["response"]["content"],
                         feedback=None,
+                        model=assistant_for_transcript["model"],
                         seconds_offset=t_offset + 1,
                     )
                     rejected["continuation_status"] = "rejected"
-                    rejected["model"] = assistant_for_transcript["model"]
                     traces.append(rejected)
 
             transcript.append(assistant_for_transcript["response"])
